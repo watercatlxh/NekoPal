@@ -26,7 +26,8 @@ export interface CommandContext {
 	startedAt: number;
 	version: string;
 	enabledChannels: string[];
-	qqQuota?: () => string;
+	/** The QQ proactive-quota line, when the QQ channel is running. */
+	qqQuota?: () => string | undefined;
 }
 
 export interface Command {

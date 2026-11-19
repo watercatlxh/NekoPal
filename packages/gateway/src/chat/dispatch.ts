@@ -151,7 +151,12 @@ export class Dispatcher {
 			startedAt: this.options.startedAt,
 			version: this.options.version,
 			enabledChannels: this.options.enabledChannels,
-			qqQuota: this.options.qqQuota ? () => this.options.qqQuota?.(message.chatId, chat.lang) ?? "" : undefined,
+			qqQuota: this.options.qqQuota
+				? () => {
+						const line = this.options.qqQuota?.(message.chatId, chat.lang);
+						return line === undefined || line === "" ? undefined : line;
+					}
+				: undefined,
 		};
 	}
 }

@@ -107,7 +107,8 @@ export function createCommands(): CommandTable {
 			if (pending > 0) lines.push(t(lang, "settings.pending", { n: pending }));
 			lines.push(t(lang, "settings.jobs", { n: jobs }));
 			lines.push(t(lang, "settings.channels", { channels: context.enabledChannels.join(" · ") }));
-			if (context.qqQuota) lines.push(context.qqQuota());
+			const quota = context.qqQuota?.();
+			if (quota) lines.push(quota);
 			await chat.sendPlain(lines.join("\n"));
 		},
 	});
