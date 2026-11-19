@@ -26,7 +26,7 @@ function runSyncVersions(root) {
 }
 
 // #10865: caret ranges allowed older agents to install incompatible newer workspace dependencies.
-test("pins published and private dependencies without touching registry aliases, generated manifests, or published lockstep", async () => {
+test("pins workspace dependencies without touching registry aliases or generated manifests", async () => {
 	const root = await mkdtemp(join(tmpdir(), "pi-sync-versions-"));
 	try {
 		await writeManifest(root, "packages/ai", {
@@ -46,21 +46,14 @@ test("pins published and private dependencies without touching registry aliases,
 				"@earendil-works/pi-ai": "1.0.0",
 			},
 		});
+		// Private, but still a workspace package: it takes part in the lockstep version.
 		await writeManifest(root, "packages/evals", {
 			name: "@earendil-works/pi-evals",
-			version: "9.9.9",
+			version: "2.0.0",
 			private: true,
 			dependencies: {
 				"@earendil-works/pi-coding-agent": "^1.0.0",
 				"@mariozechner/pi-ai": "npm:@earendil-works/pi-ai@1.0.0",
-			},
-		});
-		await writeManifest(root, "apps/p2", {
-			name: "p2",
-			version: "0.0.1",
-			private: true,
-			dependencies: {
-				"@earendil-works/pi-ai": "1.0.0",
 			},
 		});
 		await writeManifest(root, "packages/coding-agent/install-lock", {
@@ -82,9 +75,6 @@ test("pins published and private dependencies without touching registry aliases,
 		const evalsManifest = await readManifest(root, "packages/evals");
 		assert.equal(evalsManifest.dependencies["@earendil-works/pi-coding-agent"], "2.0.0");
 		assert.equal(evalsManifest.dependencies["@mariozechner/pi-ai"], "npm:@earendil-works/pi-ai@1.0.0");
-		const appManifest = await readManifest(root, "apps/p2");
-		assert.equal(appManifest.dependencies["@earendil-works/pi-ai"], "2.0.0");
-		assert.equal(appManifest.version, "0.0.1");
 		const generatedManifest = await readManifest(root, "packages/coding-agent/install-lock");
 		assert.equal(generatedManifest.dependencies["@earendil-works/pi-coding-agent"], "^1.0.0");
 
@@ -103,7 +93,7 @@ test("pins published and private dependencies without touching registry aliases,
 	}
 });
 
-test("syncs to the published packages only, not to private fixtures or nested copies of a package", async () => {
+test("syncs workspace packages only, not nested copies of a package or fixture trees", async () => {
 	const root = await mkdtemp(join(tmpdir(), "pi-sync-versions-"));
 	try {
 		await writeManifest(root, "packages/coding-agent", {
@@ -115,15 +105,16 @@ test("syncs to the published packages only, not to private fixtures or nested co
 			name: "@earendil-works/pi-coding-agent",
 			version: "1.0.0",
 		});
-		await writeManifest(root, "packages/chord/test/examples/deps/greeting", {
+		await writeManifest(root, "packages/coding-agent/test/fixtures/greeting", {
 			name: "example-greeting",
 			version: "1.0.0",
 			private: true,
 		});
-		await writeManifest(root, "packages/chord/test/examples/plugins/report", {
+		await writeManifest(root, "packages/coding-agent/test/fixtures/report", {
 			name: "report",
+			version: "1.0.0",
 			private: true,
-			dependencies: { "example-greeting": "file:../../deps/greeting" },
+			dependencies: { "example-greeting": "file:../greeting" },
 		});
 		await writeManifest(root, "packages/evals", {
 			name: "@earendil-works/pi-evals",
@@ -136,8 +127,8 @@ test("syncs to the published packages only, not to private fixtures or nested co
 		assert.equal(result.status, 0, result.stderr);
 		const evalsManifest = await readManifest(root, "packages/evals");
 		assert.equal(evalsManifest.dependencies["@earendil-works/pi-coding-agent"], "2.0.0");
-		const pluginManifest = await readManifest(root, "packages/chord/test/examples/plugins/report");
-		assert.equal(pluginManifest.dependencies["example-greeting"], "file:../../deps/greeting");
+		const fixtureManifest = await readManifest(root, "packages/coding-agent/test/fixtures/report");
+		assert.equal(fixtureManifest.dependencies["example-greeting"], "file:../greeting");
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

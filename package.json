@@ -15,7 +15,7 @@
 		"check:entry-graphs": "node scripts/check-entry-graphs.mjs",
 		"generate:models": "npm --prefix packages/ai run generate-models",
 		"test": "npm run test:scripts && npm run test --workspace packages --if-present",
-		"test:scripts": "node --test scripts/*.test.mjs scripts/*.test.ts",
+		"test:scripts": "node --test scripts/*.test.mjs",
 		"test:mcp-conformance": "node packages/coding-agent/test/mcp-conformance/run.ts"
 	},
 	"devDependencies": {
