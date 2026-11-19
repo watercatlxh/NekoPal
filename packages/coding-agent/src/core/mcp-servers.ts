@@ -103,15 +103,12 @@ export interface McpOAuthConfig extends McpOAuthFields {
 	clientSecret?: string;
 	/**
 	 * `client_name` sent with dynamic client registration, for servers that only accept known clients.
-	 * Default: `pi`.
+	 * Default: the app name, `nekopal`.
 	 */
 	clientName?: string;
 	/**
-	 * How pi identifies itself without `clientId`. `auto` (default): pi's Client ID Metadata Document on
-	 * pi.dev when the authorization server supports it for public clients, otherwise dynamic client
-	 * registration; with `clientName` or a `callbackUrl` other than `/callback` on localhost or 127.0.0.1,
-	 * always dynamic client registration. `cimd`: always the document, and sign-in fails without support.
-	 * `dcr`: always dynamic client registration.
+	 * How the app identifies itself without `clientId`. `auto` (default) and `dcr` both use dynamic
+	 * client registration: NekoPal publishes no client metadata document, so `cimd` always fails.
 	 */
 	clientRegistration?: "auto" | "dcr" | "cimd";
 }

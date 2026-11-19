@@ -1,8 +1,11 @@
 # Custom Providers
 
-A provider extension connects Pi to a model service that needs custom authentication, model discovery, request handling, or streaming. If the service already speaks a supported API, configure it in `models.json` instead.
+A provider extension connects NekoPal to a model service that needs custom authentication, model
+discovery, request handling, or streaming. If the service already speaks a supported API, configure it
+in `models.json` instead.
 
-Provider extensions run inside Pi and can inspect credentials, prompts, tool definitions, model responses, and usage. Treat them as trusted code and avoid logging secrets or provider payloads.
+Provider extensions run inside the daemon and can inspect credentials, prompts, tool definitions, model
+responses, and usage. Treat them as trusted code and avoid logging secrets or provider payloads.
 
 ## Choose the smallest integration
 
@@ -18,14 +21,16 @@ A provider extension is an [extension](extensions.md), so it follows the same lo
 
 ## Register a provider
 
-Call `pi.registerProvider()` from the extension factory. Pi waits for asynchronous factories before startup continues, so providers registered there are available to startup model selection and `pi --list-models`.
+Call `pi.registerProvider()` from the extension factory. Asynchronous factories are awaited before
+startup continues, so providers registered there are available to startup model selection.
 
 There are two registration forms:
 
 - Register a complete `Provider` from `@earendil-works/pi-ai` for native authentication, filtering, discovery, refresh, and streaming behavior.
 - Register a provider name with `ProviderConfig` for the legacy configuration form used by existing extensions.
 
-Prefer a complete provider for new integrations that own more than static endpoint and model metadata. Pi composes `models.json` overrides above a registered native provider.
+Prefer a complete provider for new integrations that own more than static endpoint and model metadata.
+`models.json` overrides compose above a registered native provider.
 
 Registering only `baseUrl` or `headers` for an existing provider preserves its built-in models. Supplying `models` in the legacy form replaces that provider's models across chat, image, and classifier operations. An omitted `type` means `"chat"`; image and classifier models require explicit discriminants and implementations keyed by their `api` values through the `images` and `classifiers` fields.
 
@@ -121,11 +126,13 @@ Model-level `baseUrl` values take precedence over the provider endpoint. If no `
 
 Calls made after initial extension loading take effect immediately. Use `pi.unregisterProvider()` to remove the dynamic provider and restore built-in behavior that it replaced.
 
-See the checked [GitLab Duo provider](../examples/extensions/custom-provider-gitlab-duo/) for a complete registration that delegates streaming to built-in API implementations.
+See the checked [GitLab Duo provider](../examples/extensions/custom-provider-gitlab-duo/) for a complete
+registration that delegates streaming to built-in API implementations.
 
 ## Provide authentication
 
-Static providers can resolve an API key from a literal, environment interpolation, or a command. These values use the same syntax as `models.json`:
+Static providers can resolve an API key from a literal, environment interpolation, or a command. These
+values use the same syntax as `models.json`:
 
 - `$NAME` and `${NAME}` read environment variables.
 - A leading `!command` uses command output.
@@ -134,11 +141,13 @@ Static providers can resolve an API key from a literal, environment interpolatio
 
 Use native provider authentication when the integration needs stored credentials, custom resolution, provider-scoped environment, or multiple login methods.
 
-An OAuth provider supplies a display name, login flow, token refresh, and access-token resolution. After registration it appears in `/login`, and Pi stores returned credentials in `~/.pi/agent/auth.json`.
+An OAuth provider supplies a display name, login flow, token refresh, and access-token resolution. After
+registration it appears in `/login`, and returned credentials are stored in `~/.nekopal/auth.json`.
 
-OAuth callbacks are UI-neutral. They can open an authorization URL, show a device code, report progress, request input, or ask the user to choose a login method. Honor cancellation and the supplied abort signal during network requests.
-
-Press Enter (`tui.select.confirm`) to open the device-login URL and copy the code, or log in manually. Providers can disable either action with `openBrowserOnConfirm: false` or `copyCodeOnConfirm: false` in `onDeviceCode` or native `AuthEvent` notifications.
+OAuth callbacks are UI-neutral. They can open an authorization URL, show a device code, report progress,
+request input, or ask the user to choose a login method. Honor cancellation and the supplied abort
+signal during network requests. The daemon renders `notify` as a chat message and `prompt` as a chat
+question, so a provider written for pi's RPC mode works unchanged.
 
 Never write access tokens, refresh tokens, authorization headers, or complete provider responses to ordinary logs.
 
@@ -146,7 +155,7 @@ Never write access tokens, refresh tokens, authorization headers, or complete pr
 
 Every model needs an ID, display name, input capabilities, and cost metadata. Chat and classifier models also need a context window; chat models need an output limit and reasoning support; image models declare their output modalities. Choose the API implementation at the provider level unless one model requires an override.
 
-Set `promptCache.short` or `promptCache.long` to the provider's best-effort cache lifetime in seconds when Pi should keep an idle prompt cache warm. Leave them unset to disable cache warming for that retention tier.
+Set `promptCache.short` or `promptCache.long` to the provider's best-effort cache lifetime in seconds when NekoPal should keep an idle prompt cache warm. Leave them unset to disable cache warming for that retention tier.
 
 Compatibility flags describe verified differences in an otherwise supported API. Do not enable them based only on an endpoint claiming compatibility.
 
@@ -157,19 +166,24 @@ Use `refreshModels` when the available catalog comes from a live service. Pass `
 The two registration forms have different refresh contracts:
 
 - A complete `Provider` returns nothing. It calls `context.publish({ update })` to install provider-owned model state, after which its synchronous `getModels()` exposes the latest list.
-- Legacy `ProviderConfig.refreshModels` returns mixed-operation model definitions. Pi replaces that registration’s live models with the returned list and applies any requested persistence.
+- Legacy `ProviderConfig.refreshModels` returns mixed-operation model definitions. NekoPal replaces that registration’s live models with the returned list and applies any requested persistence.
 
-Publish persisted catalog data only when it should survive across runs. A live service such as llama.cpp can update its in-memory list without persisting it; a remote catalog can retain a snapshot for offline startup.
+Publish persisted catalog data only when it should survive across runs. A live service such as a local
+model server can update its in-memory list without persisting it; a remote catalog can retain a snapshot
+for offline startup.
 
 ## Reuse a supported streaming API
 
-Use one of Pi AI’s API implementations whenever the provider protocol matches it.
+Use one of pi-ai’s API implementations whenever the provider protocol matches it.
 
-Supported implementations cover Anthropic Messages, OpenAI Chat Completions and Responses, Google Generative AI and Vertex, Azure OpenAI Responses, Mistral Conversations, and Bedrock Converse.
+Supported implementations cover Anthropic Messages, OpenAI Chat Completions and Responses, OpenAI
+Codex Responses, Google Generative AI, and OpenAI Decisions.
 
-The provider can still customize authentication, base URLs, headers, model filtering, and discovery while delegating request conversion and streaming to an existing API implementation.
+The provider can still customize authentication, base URLs, headers, model filtering, and discovery
+while delegating request conversion and streaming to an existing API implementation.
 
-This is safer than copying a stream implementation because it preserves Pi’s message conversion, tool handling, usage accounting, cancellation, and compatibility behavior.
+This is safer than copying a stream implementation because it preserves the harness's message
+conversion, tool handling, usage accounting, cancellation, and compatibility behavior.
 
 ## Implement custom streaming
 
@@ -197,15 +211,18 @@ The stream must also honor request instrumentation supplied through `SimpleStrea
 - Await `options.onProviderStreamEvent?.(providerEvent, model)` for each parsed provider event before normalizing it.
 - Pass through the abort signal and provider-scoped environment.
 
-These hooks power extension request inspection, response-header events, and provider-stream observation. Omitting them makes the provider behave differently from Pi’s built-in providers.
+These hooks power extension request inspection, response-header events, and provider-stream observation. Omitting them makes the provider behave differently from NekoPal’s built-in providers.
 
 ## Report failures and usage
 
 Set a concrete terminal stop reason. Error and aborted messages need an `errorMessage`; successful messages need accurate input, output, cache, total-token, and cost values.
 
-Pi can compact and retry after recognized context-overflow errors. If the service uses an unknown message, normalize only that provider’s overflow response to `context_length_exceeded` in a guarded `message_end` handler.
+The harness can compact and retry after recognized context-overflow errors. If the service uses an
+unknown message, normalize only that provider’s overflow response to `context_length_exceeded` in a
+guarded `message_end` handler.
 
-Do not rewrite rate limits or transient provider failures as context overflow. Those failures use Pi’s normal retry behavior instead.
+Do not rewrite rate limits or transient provider failures as context overflow. Those failures use the
+normal retry behavior instead.
 
 ## Test the integration
 
@@ -222,6 +239,9 @@ Test at least:
 - cross-provider session handoff
 - authentication refresh and cancellation
 
-The provider tests under [`packages/ai/test`](https://github.com/earendil-works/pi/tree/main/packages/ai/test) define the behavior expected from built-in providers. Adapt the relevant suites rather than relying only on manual prompts.
+The provider tests under [`packages/ai/test`](https://github.com/earendil-works/pi/tree/main/packages/ai/test)
+define the behavior expected from built-in providers. Adapt the relevant suites rather than relying only
+on manual prompts.
 
-Run the extension directly while developing, then move it to a discovered extension location or distribute it through a [Pi package](packages.md). Use `/reload` after changing a discovered provider extension in an active session.
+Put the extension in `~/.nekopal/extensions/` while developing, or distribute it through a
+[pi package](packages.md). Restart the daemon after changing a discovered provider extension.

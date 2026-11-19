@@ -1,140 +1,118 @@
 # Quickstart
 
-Pi runs in your terminal and works with files on your machine. To use it, you need access to a model through a supported provider. This can be a subscription, an API key, or a local model.
+NekoPal runs as a daemon on a machine you control and answers you through Telegram or QQ. It works
+with files on that machine and needs a model, which you reach through one of four OAuth providers.
 
-For native Windows setup, read [Windows Setup](windows.md). For Android, read [Termux Setup](termux.md).
+You need Node.js 22.19 or newer and a Telegram bot token or a QQ bot app ID and secret. Nothing else
+is installed globally.
 
-## 1. Install Pi
-
-Install Pi with the installer on macOS, Linux, or Windows:
-
-```bash tab="macOS / Linux"
-curl -fsSL https://pi.dev/install.sh | sh
-```
-
-```powershell tab="Windows"
-powershell -c "irm https://pi.dev/install.ps1 | iex"
-```
-
-Both installers pin all dependencies and update Pi with `pi update`. Alternatively, install Pi from npm, which does not pin transitive dependencies. This requires Node.js 22.19 or newer:
+## 1. Build it
 
 ```bash
-npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+git clone <repository> NekoPal
+cd NekoPal
+npm ci
+npm run build
 ```
 
-Pi does not require dependency lifecycle scripts for a normal npm installation.
+`npm run build` compiles every workspace package, including the gateway that contains the daemon
+entry point.
 
-With Nix on macOS or Linux, install the latest release from Pi's flake. Nix builds Pi from source:
+## 2. Configure a channel
+
+The daemon reads `~/.nekopal/settings.toml` (or `$NEKOPAL_HOME/settings.toml`). Create it with at
+least one channel enabled:
+
+```toml
+[nekopal]
+defaultLang = "en"
+workspace = "~/.nekopal/workspace"
+
+[nekopal.channels.telegram]
+enabled = true
+botToken = "$TELEGRAM_BOT_TOKEN"
+allowedUsers = [123456789]
+```
+
+`botToken` is a reference, not a value: `$NAME` reads an environment variable and `!command` runs a
+command. Put the real secret in the environment or in `~/.nekopal/env`:
 
 ```bash
-nix profile add github:earendil-works/pi/stable
+TELEGRAM_BOT_TOKEN=123456:ABC...
 ```
 
-Older Nix versions use `nix profile install` instead. Update with `nix profile upgrade pi`; `pi update` cannot update a Nix installation. To pin a release, use a tag such as `github:earendil-works/pi/v1.0.0`.
+`allowedUsers` is the static allowlist of Telegram user ids. A message from anyone else is dropped,
+so an empty list ignores every message.
 
-Verify the installation:
+For QQ, set `[nekopal.channels.qq]` with `enabled`, `appId`, `appSecret` and `allowedOpenIds`
+instead. See [Configuration](configuration.md) for every key.
+
+## 3. Start the daemon
 
 ```bash
-pi --version
+node packages/gateway/dist/main.js
 ```
 
-## 2. Start Pi
+With no channel enabled it exits with code 1 and says which setting to change. On a server, run it
+under systemd with `deploy/nekopal.service`; that unit reads secrets from `~/.nekopal/env`.
 
-Change to the folder you want Pi to work with, then start it:
+## 4. Sign in from the chat
 
-```bash
-cd /path/to/folder
-pi
-```
-
-The working folder helps Pi discover relevant files, instructions, and configuration. Pi also uses it to group saved sessions.
-
-<p align="center"><img src="images/interactive-mode.png" alt="Pi running in a terminal with a conversation, input editor, and status footer" width="750"></p>
-
-The interface shows your conversation, an editor for prompts and commands, and a footer with the current folder, model, and session status. See [Use Pi in the terminal](usage.md) to learn how to add files, run commands, direct ongoing work, and manage results.
-
-## 3. Choose a model
-
-A **model** generates Pi's responses. A **provider** is the service or account Pi uses to access that model.
-
-In Pi, run:
+Send the bot a message. The first thing to do is sign in to a model provider:
 
 ```text
 /login
 ```
 
-Choose a provider, then follow the prompts to use a subscription or store an API key. Run `/model` afterward if you want to select a different available model.
+NekoPal lists `anthropic`, `openai`, `openai-codex` and `xai`. Pick one and it sends an authorization
+link. Open the link, finish the flow, and paste the final redirect URL or the code back into the chat.
+The warning in that message is literal: the pasted code stays in the chat history. Credentials are
+stored in `~/.nekopal/auth.json` with mode 0600.
 
-See [Choose a model and provider](models.md) for supported providers, environment-variable authentication, local models, and custom endpoints.
+`/cancel` aborts a pending login. `/logout <provider>` removes a credential.
 
-## 4. Give Pi a task
+## 5. Ask for something
 
-Pi shows each file read, search, command, and edit it performs. It does not ask before every tool call.
-
-Enter a task that matches your work, for example:
+Send a normal message. NekoPal shows each file read, command and edit it performs; it does not ask
+before every tool call.
 
 ```text
-Summarize @meeting-notes.md and save the action items to action-items.md.
+Summarize the last 200 lines of /var/log/nginx/error.log and tell me what to fix.
 ```
 
 ```text
-Explain how this repository is structured and how to run its checks.
+Remember that I prefer short answers.
 ```
 
-```text
-Compare @previous.csv with @current.csv and summarize the important changes.
-```
-
-Type `@` in the editor to search for a file instead of entering its full path. When Pi finishes, review its response and any changed files. Use version control or backups for important work. For untrusted or unattended work, use a container or another sandbox. See [Security](security.md).
+If a reply is already running, a second message is queued and acknowledged; `/stop` aborts the
+running reply.
 
 ## Continue later
 
-Pi saves sessions automatically. Exit Pi, then resume the most recent session for the same working folder with:
-
-```bash
-pi --continue
-```
-
-Use `/resume` to choose another saved session. See [Continue or branch a session](sessions.md) for session naming, branching, compaction, export, and sharing.
+Sessions are saved per chat under `~/.nekopal/sessions/`. `/new` starts a fresh one, `/sessions` lists
+recent ones, and `/resume <number|id>` switches back. See [Sessions and Context](sessions.md).
 
 ## Next steps
 
-- [Use Pi interactively](usage.md) to learn input, commands, shortcuts, and queued messages.
-- [Add instructions](configuration.md#context-files) that Pi should follow whenever it works in a folder.
-- [Choose a model and provider](models.md).
+- [Chat commands](slash-commands.md) lists everything NekoPal understands.
+- [Configuration](configuration.md) covers the data directory, settings and the `[nekopal]` table.
+- [Choose a model](models.md) explains OAuth sign-in and custom endpoints.
+- [Security](security.md) explains what the daemon can reach on your machine.
 
-### Choose how to customize Pi
+### Choose how to customize NekoPal
 
 Start with the least powerful mechanism that meets your need:
 
 | Need | Start with |
 |---|---|
-| Give Pi persistent instructions for a folder | [`AGENTS.md`](configuration.md#context-files) |
-| Reuse a prompt from the `/` menu | [Prompt template](prompt-templates.md) |
+| Persistent instructions for the agent | [`AGENTS.md`](configuration.md#context-files) |
+| Reuse a prompt from the chat | [Prompt template](prompt-templates.md) |
 | Add task-specific instructions and supporting files | [Skill](skills.md) |
 | Add executable tools, commands, or event handlers | [Extension](extensions.md) |
-| Build a custom terminal component | [Terminal UI](tui.md) |
 | Connect an unsupported model service | [Custom provider](custom-provider.md) |
-| Install or distribute several resources | [Pi package](packages.md) |
+| Install or distribute several resources | [pi package](packages.md) |
 
-## Uninstall Pi
+## Remove it
 
-If you installed Pi with npm, run:
-
-```bash
-npm uninstall -g @earendil-works/pi-coding-agent
-```
-
-If you used the installer, run it again and choose **Uninstall Pi**:
-
-```bash
-curl -fsSL https://pi.dev/install.sh | sh
-```
-
-If you installed Pi with Nix, run:
-
-```bash
-nix profile remove pi
-```
-
-None of these methods removes configuration, credentials, sessions, or installed Pi packages from `~/.pi/agent/`.
+Stop the daemon and delete the checkout. Configuration, credentials, sessions, memory and installed
+packages live in `~/.nekopal` and stay until you delete that directory.

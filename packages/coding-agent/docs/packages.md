@@ -1,47 +1,57 @@
-# Pi Packages
+# pi packages
 
-Pi packages install and distribute extensions, skills, prompt templates, and themes as one unit. Use a package when a customization should be shared through npm or git, or when several resources belong together.
+A pi package installs and distributes extensions, skills, and prompt templates as one unit. Use a
+package when a customization should be shared through npm or git, or when several resources belong
+together.
 
 A package is an ordinary directory or npm package. It can expose conventional resource directories, declare explicit paths under the `pi` key in `package.json`, and carry its own runtime dependencies.
 
 ## Install and manage packages
 
-Install from npm, git, or a local path:
+Install from npm, git, or a local path, from the chat:
 
-```bash
-pi install npm:@example/pi-tools@1.0.0
-pi install git:github.com/example/pi-tools@v1
-pi install ./local-package
+```text
+/install npm:@example/pi-tools@1.0.0
+/install git:github.com/example/pi-tools@v1
+/install ./local-package
 ```
 
-`pi list` shows configured packages. Use `pi remove <source>` to remove one and `pi update --extensions` to reconcile package installations. See [Command Line](cli.md#package-commands) for every package command and option.
+`/packages` lists configured packages and `/remove <source>` removes one. After an install or removal
+the daemon reloads every open chat, so the new resources are live without a restart.
 
-If a configured package fails to install at startup, for example because npm cannot reach the registry, Pi warns about it, skips that package's resources, and keeps running. Pi tries to install it again on the next start or `/reload`. `pi install` and `pi update --extensions` still report the failure and exit non-zero.
+If a configured package fails to install at startup, for example because npm cannot reach the registry,
+NekoPal logs it, skips that package's resources, and keeps running. It tries again on the next start or
 
-Personal installs are written to `~/.pi/agent/settings.json`. Add `--local` or `-l` to write the package declaration to `.pi/settings.json`. Pi reads declarations from that file only after project trust is granted.
 
-Project packages are installed and loaded only after project trust is resolved. Packages can execute extension code and can include skills that instruct the model to run programs. Review third-party package source before installing it. Review project package declarations before granting project trust.
+Installs are written to `~/.nekopal/settings.toml`. A package declared in a project
+`.nekopal/settings.toml` is installed and loaded only after project trust is resolved. Packages can
+execute extension code and can include skills that instruct the model to run programs. Review
+third-party package source before installing it, and review project package declarations before
+granting project trust.
 
-Use `--extension` or `-e` to try a package for one invocation without adding it to settings:
+To try a package without installing it, list it in `extensions` as a path or add it to `packages` and
+remove it later. NekoPal has no one-shot flag because it has no command line.
 
-```bash
-pi -e npm:@example/pi-tools
-```
-
-Pi caches `-e` packages under `~/.pi/agent/tmp/extensions/` and checks them on every start and `/reload`. An npm package is reinstalled when the registry has a newer version that matches the specification. A version pinned to an exact number, such as `@1.2.3`, is not checked. A git package is fetched and reset to the remote branch or ref. A ref that is a commit hash already checked out is not fetched. If the check fails or offline mode is on, Pi loads the cached copy.
+Packages are cached under `~/.nekopal/tmp/extensions/` and checked on every start. An npm
+package is reinstalled when the registry has a newer version that matches the specification. A version
+pinned to an exact number, such as `@1.2.3`, is not checked. A git package is fetched and reset to the
+remote branch or ref. A ref that is a commit hash already checked out is not fetched. If the check
+fails or `NEKOPAL_OFFLINE` is set, the cached copy loads.
 
 ## Choose a source
 
 | Source | Example | Behavior |
 |---|---|---|
-| npm | `npm:@example/pi-tools@1.0.0` | Installed under the Pi npm directory |
+| npm | `npm:@example/pi-tools@1.0.0` | Installed under the NekoPal npm directory |
 | git | `git:github.com/example/pi-tools@v1` | Cloned and reconciled to the selected ref |
 | URL | `https://github.com/example/pi-tools` | Treated as a git source |
 | Local | `./pi-tools` | Loaded from the resolved path without copying |
 
-Versioned npm specifications are pinned. Git tags and commits are also pinned; package updates reconcile the checkout but do not move a configured ref.
+Versioned npm specifications are pinned. Git tags and commits are also pinned; package updates
+reconcile the checkout but do not move a configured ref.
 
-Relative local paths resolve from the settings file that contains them. A file path loads one extension. A directory follows normal package discovery rules.
+Relative local paths resolve from the settings file that contains them. A file path loads one
+extension. A directory follows normal package discovery rules.
 
 ## Create a package
 
@@ -52,11 +62,11 @@ my-pi-package/
 ├── package.json
 ├── extensions/
 ├── skills/
-├── prompts/
-└── themes/
+└── prompts/
 ```
 
-Without a `pi` manifest, Pi discovers TypeScript and JavaScript extensions, skill directories, Markdown prompts, and JSON themes from those directories.
+Without a `pi` manifest, NekoPal discovers TypeScript and JavaScript extensions, skill directories, and
+Markdown prompts from those directories.
 
 Use an explicit manifest when resources live elsewhere or need filtering:
 
@@ -67,23 +77,20 @@ Use an explicit manifest when resources live elsewhere or need filtering:
   "pi": {
     "extensions": ["./src/extension.ts"],
     "skills": ["./resources/skills"],
-    "prompts": ["./resources/prompts/*.md"],
-    "themes": ["./resources/themes/*.json"]
+    "prompts": ["./resources/prompts/*.md"]
   }
 }
 ```
 
 Paths are relative to the package root. Arrays accept glob patterns and exclusions. List dot-prefixed or symlinked resource roots directly when traversal through a glob would not discover them.
 
-The `pi-package` keyword makes an npm package eligible for discovery in the [Pi package gallery](https://pi.dev/packages). Optional `pi.image` and `pi.video` fields add gallery previews.
+The `pi-package` keyword marks an npm package as a pi package; NekoPal does not require it, but it keeps
+the package discoverable by pi tooling.
 
-## Show a changelog
+## Declare a changelog
 
-After a package update, Pi can show what changed. On the next fresh launch, Pi reads the package changelog and shows entries newer than the last seen version under "Extension Updates", the same way it shows its own changelog. The first time Pi sees a package, it records the version without showing anything.
-
-This applies to packages that load at least one extension. Packages that only provide skills, prompt templates, or themes do not show a changelog.
-
-By default Pi reads `CHANGELOG.md` from the package root. Point `pi.changelogPath` at another file inside the package, or set it to `""` to disable the changelog:
+NekoPal does not display package changelogs, but it reads the manifest field. Point `pi.changelogPath`
+at a file inside the package, or set it to `""` to disable changelog discovery:
 
 ```json
 {
@@ -95,23 +102,29 @@ By default Pi reads `CHANGELOG.md` from the package root. Point `pi.changelogPat
 }
 ```
 
-Use version headings in the same format as Pi's changelog, such as `## [1.2.0]` or `## 1.2.0 - 2026-01-01`. Entries are matched against the `version` field in `package.json`, so a git package only shows a changelog when that field increases. The `collapseChangelog` setting condenses the section to one line per package, such as `Updated my-pi-package to v1.2.0.` Unlike Pi's own changelog, `/changelog` does not show package changelogs, so read the package's changelog file or repository for details.
-
 ## Declare dependencies
 
-Put runtime packages imported by extensions in `dependencies`. Pi installs package dependencies when it installs an npm or git source.
+Put runtime packages imported by extensions in `dependencies`. NekoPal installs package dependencies when it installs an npm or git source.
 
-Pi supplies these packages to extensions and skills:
+It supplies these packages to extensions and skills:
 
 - `@earendil-works/pi-ai`
 - `@earendil-works/pi-agent-core`
 - `@earendil-works/pi-coding-agent`
-- `@earendil-works/pi-tui`
 - `typebox`
 
-Declare the host-provided packages listed above in `peerDependencies` with a `"*"` range and do not bundle them. Pi suppresses automatic peer installation for managed npm packages and git packages installed with npm, pnpm, or Bun. Local packages are not installed or modified, so their dependency tree remains the package author's responsibility.
+`@earendil-works/pi-tui` is not provided. An extension that imports it fails to load with an explicit
+error.
 
-Do not list host-provided packages in `dependencies`. A physical copy can bypass Pi's extension module mapping in compiled ESM and create duplicate classes, registries, and initialization work. Pi reports an extension warning when it detects this manifest configuration. Other Pi packages used as dependencies must be included in the published tarball and referenced through their `node_modules` resource paths.
+Declare the host-provided packages listed above in `peerDependencies` with a `"*"` range and do not
+bundle them. Automatic peer installation is suppressed for managed npm and git packages. Local packages
+are not installed or modified, so their dependency tree remains the package author's responsibility.
+
+Do not list host-provided packages in `dependencies`. A physical copy can bypass the extension module
+mapping in compiled ESM and create duplicate classes, registries, and initialization work. NekoPal
+reports an extension warning when it detects this manifest configuration. Other packages used as
+dependencies must be included in the published tarball and referenced through their `node_modules`
+resource paths.
 
 Installed packages load with separate module roots. Do not rely on two packages sharing one dependency instance or one package resolving another package’s undeclared dependency.
 
@@ -142,12 +155,18 @@ For each resource type:
 
 Filters narrow the package manifest. They do not expose resources that the package itself did not declare.
 
-Run `pi config` to enable or disable discovered resources and pi's built-in extensions. It starts with personal configuration; press Tab to switch scope, or run `pi config --local` to start with project overrides.
+The `extensions` and `skills` lists in [settings](settings.md#resources) accept the same filter syntax
+and control which discovered resources load.
 
 ## Understand scope and identity
 
-The same package can appear in personal and project settings. A project entry normally replaces the personal entry. With `autoload: false`, the project entry instead acts as a filtering delta over the personal package.
+The same package can appear in global and project settings. A project entry normally replaces the
+global entry. With `autoload: false`, the project entry instead acts as a filtering delta over the
+global package.
 
-Pi identifies npm packages by package name, git packages by repository URL without the ref, and local packages by resolved absolute path. This prevents the same package from loading twice through equivalent declarations.
+NekoPal identifies npm packages by package name, git packages by repository URL without the ref, and
+local packages by resolved absolute path. This prevents the same package from loading twice through
+equivalent declarations.
 
-Use [Extensions](extensions.md), [Skills](skills.md), [Prompt Templates](prompt-templates.md), and [Themes](themes.md) to design each resource before packaging it.
+Use [Extensions](extensions.md), [Skills](skills.md), and [Prompt Templates](prompt-templates.md) to
+design each resource before packaging it.

@@ -37,7 +37,7 @@ shipped, so an extension that imports it fails to load with an explicit error.
 - [Extensions](extensions.md) add tools, commands and event handlers.
 - [Skills](skills.md) add task-specific instructions and supporting files.
 - [Prompt templates](prompt-templates.md) add reusable message text.
-- [Pi packages](packages.md) distribute these resources through npm or git.
+- [pi packages](packages.md) distribute these resources through npm or git.
 - [MCP servers](mcp.md) connect external tool servers.
 
 ## Embed NekoPal

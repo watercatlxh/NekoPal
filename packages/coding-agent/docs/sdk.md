@@ -1,8 +1,10 @@
 # SDK
 
-`@earendil-works/pi-coding-agent` embeds Pi in a Node.js or Bun process. It provides direct TypeScript access to the agent, sessions, tools, models, and resources used by the command-line application.
+`@earendil-works/pi-coding-agent` embeds the agent harness in a Node.js or Bun process. It provides
+direct TypeScript access to the agent, sessions, tools, models, and resources that the daemon uses.
 
-Use the SDK for in-process TypeScript integration. For a language-independent or isolated subprocess, see [CLI Integration](cli-integration.md).
+Use the SDK to build your own front end over the harness. The daemon in `packages/gateway` is the
+reference implementation.
 
 ```typescript
 import { createAgentSession } from "@earendil-works/pi-coding-agent";
@@ -17,9 +19,11 @@ try {
 }
 ```
 
-This uses the working directory, discovered resources, stored settings, and configured credentials. `prompt()` resolves when the run finishes.
+This uses the working directory, discovered resources, stored settings, and configured credentials.
+`prompt()` resolves when the run finishes.
 
-The [complete minimal example](../examples/sdk/01-minimal.ts) also streams text events. All [SDK examples](../examples/sdk/) are typechecked with the repository.
+The [complete minimal example](../examples/sdk/01-minimal.ts) also streams text events. All
+[SDK examples](../examples/sdk/) are typechecked with the repository.
 
 <a id="session-management"></a>
 
@@ -35,7 +39,7 @@ Read current state through `session.messages`, `session.model`, `session.thinkin
 
 ### Session storage
 
-Sessions are persistent by default. `SessionManager` owns the persisted or in-memory entry tree and tracks its active leaf. Branching changes that leaf without deleting abandoned branches. When Pi reconstructs model context, the manager selects the active branch and applies compaction.
+Sessions are persistent by default. `SessionManager` owns the persisted or in-memory entry tree and tracks its active leaf. Branching changes that leaf without deleting abandoned branches. When NekoPal reconstructs model context, the manager selects the active branch and applies compaction.
 
 `SessionManager` is authoritative for finalized model context. Restore external history by constructing the session with a manager containing those entries. Assigning `session.agent.state.messages` does not replace persisted context.
 
@@ -91,7 +95,7 @@ Session events report message updates, tool execution, queues, compaction, retri
 
 `message_end` contains the authoritative completed message. `agent_end` marks the end of one low-level agent run, but automatic recovery or queued work can still follow.
 
-Use `agent_settled` when the host needs to know that Pi will not continue automatically.
+Use `agent_settled` when the host needs to know that NekoPal will not continue automatically.
 
 ## Configuring a session
 
@@ -102,20 +106,32 @@ Each boundary can be supplied explicitly:
 - `modelRuntime`, `model`, `thinkingLevel`, and `scopedModels` control model access and selection.
 - `settingsManager` supplies merged settings or an in-memory configuration.
 - `sessionManager` supplies persistent or in-memory conversation history.
-- `resourceLoader` supplies extensions, skills, prompt templates, themes, and context files.
+- `resourceLoader` supplies extensions, skills, prompt templates, and context files.
 - `tools`, `noTools`, `excludeTools`, and `customTools` control the active tool set.
 
 Use `DefaultResourceLoader` when you want standard discovery with selected overrides. Supply a custom `ResourceLoader` when the host owns resource storage and discovery completely.
 
 <a id="inlineextension"></a>
 
-Inline extension factories can be supplied through `DefaultResourceLoader`. Give one an `InlineExtension` name only when it needs a stable name in diagnostics and startup output. A named inline extension with `replaceable: true` is left out when another extension registers a tool, command, or flag with a name it registers during loading, instead of both loading with a conflict. The CLI's built-in codemode, tool search, and MCP extensions are replaceable. A named entry with `builtin: true` is not an inline extension: it supplies the code of the `builtin:<name>` extension, which loads like a configured extension file. It loads by default, is listed in `pi config`, and is disabled by `-builtin:<name>` in the `extensions` setting or by `noExtensions`; `additionalExtensionPaths: ["builtin:<name>"]` loads it explicitly. It loads after project trust is resolved, so it cannot handle `project_trust`. The CLI's built-in extensions use it.
+Inline extension factories can be supplied through `DefaultResourceLoader`. Give one an
+`InlineExtension` name only when it needs a stable name in diagnostics and startup output. A named
+inline extension with `replaceable: true` is left out when another extension registers a tool, command,
+or flag with a name it registers during loading, instead of both loading with a conflict. The built-in
+codemode, tool search, and MCP extensions are replaceable. A named entry with `builtin: true` is not an
+inline extension: it supplies the code of the `builtin:<name>` extension, which loads like a configured
+extension file. It loads by default and is disabled by `-builtin:<name>` in the `extensions` setting or
+by `noExtensions`.
 
 <a id="codemode-mcp"></a>
 
-The CLI loads `codemode`, `tool_search`, and MCP as built-in extensions. SDK sessions do not; add `createCodemodeExtension()`, `createToolSearchExtension()`, and `createMcpExtension()` to the `extensionFactories` of `DefaultResourceLoader`. `codemode` and `tool_search` are registered inactive: enable them through the `defaultTools` setting (`["+codemode", "+tool_search"]` keeps the other default tools), or let the MCP extension activate them: `codemode` for servers with `codemode` exposure, `tool_search` for servers with `deferred` exposure. The MCP extension connects its servers on `session_start`, so call `session.bindExtensions()`. See [Codemode and MCP](../examples/sdk/14-codemode-mcp.ts).
+The daemon loads `codemode`, `tool_search`, and MCP as built-in extensions (see
+`packages/gateway/src/chat/builtin-extensions.ts`). SDK sessions do not; add
+`createCodemodeExtension()`, `createToolSearchExtension()`, and `createMcpExtension()` to the
+`extensionFactories` of `DefaultResourceLoader`. `codemode` and `tool_search` are registered inactive: enable them through the `defaultTools` setting (`["+codemode", "+tool_search"]` keeps the other default tools), or let the MCP extension activate them: `codemode` for servers with `codemode` exposure, `tool_search` for servers with `deferred` exposure. The MCP extension connects its servers on `session_start`, so call `session.bindExtensions()`. See [Codemode and MCP](../examples/sdk/14-codemode-mcp.ts).
 
-See the focused examples for [models](../examples/sdk/02-custom-model.ts), [tools](../examples/sdk/05-tools.ts), [extensions](../examples/sdk/06-extensions.ts), and [full control](../examples/sdk/12-full-control.ts).
+See the focused examples for [models](../examples/sdk/02-custom-model.ts),
+[tools](../examples/sdk/05-tools.ts), [extensions](../examples/sdk/06-extensions.ts), and
+[full control](../examples/sdk/12-full-control.ts).
 
 ## Examples
 
@@ -143,5 +159,6 @@ See the focused examples for [models](../examples/sdk/02-custom-model.ts), [tool
 - [Choose a Model](models.md) covers model selection and compatible endpoints; [Providers](providers.md) covers credentials and provider-specific setup.
 - [Configuration](configuration.md) explains normal discovery and settings; [Settings](settings.md) lists every setting.
 - [Sessions and Context](sessions.md) explains session behavior; [Session Format](session-format.md) defines persisted entries; [Message Types](message-types.md) defines shared transcript values.
-- [Extensions](extensions.md), [Skills](skills.md), and [Prompt Templates](prompt-templates.md) document resources supplied through a `ResourceLoader`.
-- [CLI Integration](cli-integration.md) covers print, JSON, and RPC alternatives to an in-process SDK integration.
+- [Extensions](extensions.md), [Skills](skills.md), and [Prompt Templates](prompt-templates.md) document
+  resources supplied through a `ResourceLoader`.
+- [How NekoPal Works](how-pi-works.md) describes the agent loop and the daemon that wraps this SDK.

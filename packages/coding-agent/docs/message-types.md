@@ -1,6 +1,7 @@
 # Message Types
 
-Pi uses `AgentMessage` values in SDK state, lifecycle events, RPC responses, and persisted session message entries. This page defines those shared messages and their content blocks.
+The harness uses `AgentMessage` values in SDK state, lifecycle events, and persisted session message
+entries. This page defines those shared messages and their content blocks.
 
 Message timestamps are Unix timestamps in milliseconds. They are different from the ISO 8601 timestamps on [session entries](session-format.md#entry-base).
 
@@ -142,7 +143,9 @@ interface AssistantMessage {
 
 `responseModel` records the concrete model reported by the provider, when the provider reports one. It may equal the requested model. `responseId`, `providerThinkingLevel`, `thinkingLevel`, `diagnostics`, and `rawStopReason` preserve provider or runtime details.
 
-`"pending"` is used for a partial assistant message while it streams. The completed message in `message_end` has a terminal stop reason, and Pi does not persist `"pending"` assistant messages in session JSONL.
+`"pending"` is used for a partial assistant message while it streams. The completed message in
+`message_end` has a terminal stop reason, and `"pending"` assistant messages are not persisted in
+session JSONL.
 
 A `"deferred"` response has a `DeferredHandle` with the provider data needed to retrieve it:
 
@@ -199,7 +202,8 @@ The coding-agent package extends `AgentMessage` with four roles.
 
 ### BashExecutionMessage
 
-Created by direct shell commands, including the RPC [`bash`](rpc-commands.md#bash) command. It is not an LLM tool result.
+Created by direct shell commands, such as an extension calling the bash operations. It is not an LLM
+tool result.
 
 ```typescript
 interface BashExecutionMessage {
@@ -215,7 +219,7 @@ interface BashExecutionMessage {
 }
 ```
 
-Unless `excludeFromContext` is true, Pi converts this message to user-role text before the next model request.
+Unless `excludeFromContext` is true, NekoPal converts this message to user-role text before the next model request.
 
 ### CustomMessage
 
@@ -232,7 +236,8 @@ interface CustomMessage<T = unknown> {
 }
 ```
 
-Pi converts its content to a user message for model requests. `display` controls terminal rendering; `details` is not sent to the model.
+The harness converts its content to a user message for model requests. `display` controls rendering in
+a front end; `details` is not sent to the model.
 
 ### BranchSummaryMessage
 
@@ -245,7 +250,7 @@ interface BranchSummaryMessage {
 }
 ```
 
-Pi creates this context message from a persisted `branch_summary` entry.
+NekoPal creates this context message from a persisted `branch_summary` entry.
 
 ### CompactionSummaryMessage
 
@@ -258,7 +263,7 @@ interface CompactionSummaryMessage {
 }
 ```
 
-Pi creates this context message from a persisted `compaction` entry.
+NekoPal creates this context message from a persisted `compaction` entry.
 
 ## AgentMessage union
 

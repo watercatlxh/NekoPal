@@ -1,21 +1,22 @@
-> Pi can create extensions. Ask it to build one for your use case.
-
 # Extensions
 
-Extensions are TypeScript modules that extend Pi's behavior. They can subscribe to lifecycle events, register custom tools callable by the LLM, add commands, and more.
+Extensions are TypeScript modules that extend the harness. They can subscribe to lifecycle events,
+register custom tools callable by the LLM, add commands, and more.
 
-An extension runs inside the Pi process with the same operating-system permissions. It can inspect prompts, tool calls, files, credentials, and session history, so load extensions only from sources you trust.
+An extension runs inside the daemon process with the same operating-system permissions. It can inspect
+prompts, tool calls, files, credentials, and session history, so load extensions only from sources you
+trust.
 
-> **Placement for /reload:** Put extensions in `~/.pi/agent/extensions/` (global) or `.pi/extensions/` (project-local) for auto-discovery. Use `pi -e ./path.ts` only for quick tests. Extensions in auto-discovered locations can be hot-reloaded with `/reload`.
+> **Placement:** Put extensions in `~/.nekopal/extensions/` (global) or `.nekopal/extensions/`
+> (project-local) for auto-discovery. NekoPal loads them at startup; restart the daemon after changing
+> one.
 
 **Key capabilities:**
 - **Custom tools** - Register tools the LLM can call via `pi.registerTool()`
 - **Event interception** - Block or modify tool calls, inject context, customize compaction
 - **User interaction** - Prompt users via `ctx.ui` (select, confirm, input, notify)
-- **Custom UI components** - Full TUI components with keyboard input via `ctx.ui.custom()` for complex interactions
 - **Custom commands** - Register commands like `/mycommand` via `pi.registerCommand()`
 - **Session persistence** - Store state that survives restarts via `pi.appendEntry()`
-- **Custom rendering** - Control how tool calls/results and messages appear in TUI
 - **Providers and MCP servers** - Register model providers, virtual models, and MCP servers
 
 **Example use cases:**
@@ -24,12 +25,16 @@ An extension runs inside the Pi process with the same operating-system permissio
 - Path protection (block writes to `.env`, `node_modules/`)
 - Custom compaction (summarize conversation your way)
 - Conversation summaries (see `summarize.ts` example)
-- Interactive tools (questions, wizards, custom dialogs)
+- Interactive tools (questions, confirmations, wizards) through chat dialogs
 - Stateful tools (todo lists, connection pools)
 - External integrations (file watchers, webhooks, CI triggers)
-- Games while you wait (see `snake.ts` example)
 
 See [examples/extensions/](../examples/extensions/) for working implementations.
+
+NekoPal has no terminal UI, so extensions that draw one are out of scope. An extension that imports
+`@earendil-works/pi-tui` fails to load with the error
+`Extension requires @earendil-works/pi-tui (terminal UI), which NekoPal does not ship`, and the daemon
+reports the failure count in the chat once per session start. Everything else in this page applies.
 
 ## Table of Contents
 
@@ -67,7 +72,7 @@ See [examples/extensions/](../examples/extensions/) for working implementations.
 
 ## Quick Start
 
-Create `~/.pi/agent/extensions/my-extension.ts`:
+Create `~/.nekopal/extensions/my-extension.ts`:
 
 ```typescript
 import { type ExtensionAPI, isToolCallEventType } from "@earendil-works/pi-coding-agent";
@@ -112,11 +117,7 @@ export default function (pi: ExtensionAPI) {
 }
 ```
 
-Test with `--extension` (or `-e`) flag:
-
-```bash
-pi -e ./my-extension.ts
-```
+Put the file in `~/.nekopal/extensions/` and restart the daemon.
 
 <a id="choose-where-it-loads"></a>
 
@@ -124,33 +125,26 @@ pi -e ./my-extension.ts
 
 > **Security:** Extensions run with your full system permissions and can execute arbitrary code. Only install from sources you trust.
 
-Extensions are auto-discovered from trusted locations. Project-local `.pi/extensions` entries load only after the project is trusted.
+Extensions are auto-discovered from trusted locations. Project-local `.nekopal/extensions` entries load
+only after the project is trusted.
 
 | Location | Scope |
 |----------|-------|
-| `~/.pi/agent/extensions/*.ts` or `*.js` | Global (all projects) |
-| `~/.pi/agent/extensions/*/index.ts` or `index.js` | Global (subdirectory) |
-| `~/.pi/agent/extensions/*/package.json` with a `pi.extensions` field | Global (subdirectory with manifest) |
-| `.pi/extensions/...` | Project-local, same layouts |
+| `~/.nekopal/extensions/*.ts` or `*.js` | Global (all projects) |
+| `~/.nekopal/extensions/*/index.ts` or `index.js` | Global (subdirectory) |
+| `~/.nekopal/extensions/*/package.json` with a `pi.extensions` field | Global (subdirectory with manifest) |
+| `.nekopal/extensions/...` | Project-local, same layouts |
 
 Discovery goes one level deep. Larger packages declare their entry points in a `package.json` manifest.
 
-Additional paths via `settings.json`:
+Additional paths via `settings.toml`:
 
-```json
-{
-  "packages": [
-    "npm:@foo/bar@1.0.0",
-    "git:github.com/user/repo@v1"
-  ],
-  "extensions": [
-    "/path/to/local/extension.ts",
-    "/path/to/local/extension/dir"
-  ]
-}
+```toml
+packages = ["npm:@foo/bar@1.0.0", "git:github.com/user/repo@v1"]
+extensions = ["/path/to/local/extension.ts", "/path/to/local/extension/dir"]
 ```
 
-Settings also accept built-in extensions as `builtin:<name>` entries; see [Settings](settings.md#resources). To share extensions via npm or git as Pi packages, see [packages.md](packages.md).
+Settings also accept built-in extensions as `builtin:<name>` entries; see [Settings](settings.md#resources). To share extensions via npm or git as pi packages, see [packages.md](packages.md).
 
 ## Available Imports
 
@@ -159,19 +153,23 @@ Settings also accept built-in extensions as `builtin:<name>` entries; see [Setti
 | `@earendil-works/pi-coding-agent` | Extension types (`ExtensionAPI`, `ExtensionContext`, events) and helpers |
 | `@earendil-works/pi-agent-core` | Agent message and tool types |
 | `typebox`, `typebox/compile`, `typebox/value` | Schema definitions for tool parameters |
-| `@earendil-works/pi-ai` | AI utilities (`StringEnum` for string enums, transcript helpers, model types). Inside Pi it also exports TypeBox's `Type`, `Static` and `TSchema`, which the published package no longer re-exports; import them from `typebox` in new code |
+| `@earendil-works/pi-ai` | AI utilities (`StringEnum` for string enums, transcript helpers, model types). Inside NekoPal it also exports TypeBox's `Type`, `Static` and `TSchema`, which the published package no longer re-exports; import them from `typebox` in new code |
 | `@earendil-works/pi-ai/compat`, `/models`, `/oauth`, `/providers/all` | Provider construction, built-in APIs, and OAuth helpers |
-| `@earendil-works/pi-tui` | TUI components for custom rendering |
 
-Pi maps these imports to its own copies, so extensions share Pi's classes and registries. The legacy `@mariozechner/*` and `@sinclair/typebox` names map to the same modules.
+NekoPal maps these imports to its own copies, so extensions share its classes and registries. The
+legacy `@mariozechner/*` and `@sinclair/typebox` names map to the same modules.
+`@earendil-works/pi-tui` is not available; importing it makes the extension fail to load.
 
 npm dependencies work too. Add a `package.json` next to your extension (or in a parent directory), run `npm install`, and imports from `node_modules/` are resolved automatically.
 
-For distributed Pi packages installed with `pi install` (npm or git), runtime deps must be in `dependencies`; `devDependencies` are not installed. Do not list the host-provided packages above in `dependencies`. See [Declare dependencies](packages.md#declare-dependencies).
+For distributed pi packages installed with `/install` (npm or git), runtime deps must be in
+`dependencies`; `devDependencies` are not installed. Do not list the host-provided packages above in
+`dependencies`. See [Declare dependencies](packages.md#declare-dependencies).
 
 ### Tool parameter schemas and TypeBox
 
-Pi validates tool arguments as JSON Schema with `@earendil-works/pi-schema`, whatever built the schema; TypeBox schemas are JSON Schema and work unchanged. Before validation, loosely typed arguments are coerced: numeric strings to numbers, `"true"` to `true`, a single value to a one-item array, `null` in an optional property dropped. TypeBox features outside JSON Schema do not apply to tool arguments:
+NekoPal validates tool arguments as JSON Schema with `@earendil-works/pi-schema`, whatever built the
+schema; TypeBox schemas are JSON Schema and work unchanged. Before validation, loosely typed arguments are coerced: numeric strings to numbers, `"true"` to `true`, a single value to a one-item array, `null` in an optional property dropped. TypeBox features outside JSON Schema do not apply to tool arguments:
 
 - `Type.Refine()` refinements are not run. Check such constraints in `execute()`.
 - `Type.BigInt()`, `Type.Undefined()` and `Type.Void()` reject every argument, since JSON has no such values. Codecs (`Type.Codec()`) do not decode: `execute()` receives the JSON value.
@@ -210,7 +208,9 @@ export default function (pi: ExtensionAPI) {
 
 Extensions are loaded via [jiti](https://github.com/unjs/jiti), so TypeScript works without compilation.
 
-If the factory returns a `Promise`, Pi awaits it before continuing startup. That means async initialization completes before `session_start`, before `resources_discover`, and before provider registrations queued via `pi.registerProvider()` are flushed.
+If the factory returns a `Promise`, the daemon awaits it before continuing startup. That means async
+initialization completes before `session_start`, before `resources_discover`, and before provider
+registrations queued via `pi.registerProvider()` are flushed.
 
 ### Async factory functions
 
@@ -247,7 +247,9 @@ export default async function (pi: ExtensionAPI) {
 }
 ```
 
-This pattern makes the fetched models available during normal startup and to `pi --list-models`. For model lists that change while Pi runs, implement `refreshModels` instead; see [pi.registerProvider()](#piregisterprovidername-config).
+This pattern makes the fetched models available at startup. For model lists that change while the
+daemon runs, implement `refreshModels` instead; see
+[pi.registerProvider()](#piregisterprovidername-config).
 
 ### Long-lived resources and shutdown
 
@@ -260,14 +262,14 @@ Defer background resource startup until `session_start` or the command/tool/even
 **Single file** - simplest, for small extensions:
 
 ```
-~/.pi/agent/extensions/
+~/.nekopal/extensions/
 └── my-extension.ts
 ```
 
 **Directory with index.ts** - for multi-file extensions:
 
 ```
-~/.pi/agent/extensions/
+~/.nekopal/extensions/
 └── my-extension/
     ├── index.ts        # Entry point (exports default function)
     ├── tools.ts        # Helper module
@@ -277,7 +279,7 @@ Defer background resource startup until `session_start` or the command/tool/even
 **Package with dependencies** - for extensions that need npm packages:
 
 ```
-~/.pi/agent/extensions/
+~/.nekopal/extensions/
 └── my-extension/
     ├── package.json    # Declares dependencies and entry points
     ├── package-lock.json
@@ -312,7 +314,8 @@ Run `npm install` in the extension directory, then imports from `node_modules/` 
 
 A prompt starts a run. Input handling comes first:
 
-1. Extension commands (`/name`) run their handler. The `input` event does not fire. Typed and RPC prompts always check for commands; `pi.sendUserMessage()` checks only with `expandPromptTemplates: true`.
+1. Extension commands (`/mycommand`) run their handler. The `input` event does not fire. Chat prompts always
+   check for commands; `pi.sendUserMessage()` checks only with `expandPromptTemplates: true`.
 2. `input` handlers can intercept, transform, or handle the text.
 3. Skill commands (`/skill:name`) and prompt templates (`/template`) expand.
 4. `before_agent_start` runs, then the agent loop starts.
@@ -333,7 +336,7 @@ flowchart TD
     Continue -->|no| Settled["agent_settled"]
 ```
 
-More work means a retry, final-attempt recovery, a compaction retry, or queued messages. `agent_end` is therefore not a final-idle signal; use `agent_settled` for that. An aborted run skips `agent_before_settle` and goes from `agent_end` to `agent_settled`. Pi counts as busy while a run starts, including the compaction check and `before_agent_start`, so messages sent meanwhile go into the starting run.
+More work means a retry, final-attempt recovery, a compaction retry, or queued messages. `agent_end` is therefore not a final-idle signal; use `agent_settled` for that. An aborted run skips `agent_before_settle` and goes from `agent_end` to `agent_settled`. NekoPal counts as busy while a run starts, including the compaction check and `before_agent_start`, so messages sent meanwhile go into the starting run.
 
 Each turn sends one model request and executes the tool calls in the assistant response:
 
@@ -380,7 +383,7 @@ flowchart TD
     Fork["/fork or /clone"] --> BeforeFork["session_before_fork"]
     BeforeSwitch --> Shutdown["session_shutdown"]
     BeforeFork --> Shutdown
-    Reload["/reload"] --> Shutdown
+    Reload["session.reload()"] --> Shutdown
     Exit["exit"] --> Shutdown
     Shutdown --> Replacing{"Replacing the runtime?"}
     Replacing -->|yes| ReplacementTrust["project_trust when the working directory is new"]
@@ -390,15 +393,15 @@ flowchart TD
     SessionStart --> Discover["resources_discover"]
 ```
 
-`session_start` carries `reason: "startup" | "reload" | "new" | "resume" | "fork"`, and `session_shutdown` carries `reason: "quit" | "reload" | "new" | "resume" | "fork"`. `resources_discover` uses `reason: "reload"` after a reload and `"startup"` otherwise. Exit covers Ctrl+C, Ctrl+D, SIGHUP, and SIGTERM. `project_trust` runs before trusted project resources load and can run again when session replacement enters a new working directory.
+`session_start` carries `reason: "startup" | "reload" | "new" | "resume" | "fork"`, and `session_shutdown` carries `reason: "quit" | "reload" | "new" | "resume" | "fork"`. `resources_discover` uses `reason: "reload"` after a reload and `"startup"` otherwise. Exit covers SIGINT and SIGTERM, which the daemon turns into an orderly shutdown. `project_trust` runs before trusted project resources load and can run again when session replacement enters a new working directory.
 
 Other operations change the current session without replacing the runtime:
 
 | Operation | Events |
 |---|---|
-| `/compact` or automatic compaction | `session_before_compact` (can cancel or customize), then `session_compact` or `session_compact_failed` |
-| `/tree` navigation | `session_before_tree` (can cancel or customize), then `session_tree` |
-| `/name` or `pi.setSessionName()` | `session_info_changed` |
+| Automatic or extension-triggered compaction | `session_before_compact` (can cancel or customize), then `session_compact` or `session_compact_failed` |
+| Tree navigation | `session_before_tree` (can cancel or customize), then `session_tree` |
+| `pi.setSessionName()` | `session_info_changed` |
 | `/model` or model cycling (`Ctrl+P`) | `thinking_level_select` if the level changes or is clamped, then `model_select` |
 | Thinking-level change (settings, keybinding, `pi.setThinkingLevel()`) | `thinking_level_select` |
 | `!` or `!!` command | `user_bash` (can intercept) |
@@ -428,7 +431,10 @@ Notification handlers should not perform slow work on a streaming event. Transfo
 
 #### project_trust
 
-Fired before Pi decides whether to trust a project with dynamic configs (`.pi` or `.agents/skills`). It runs during startup and when session replacement (for example `/resume`) enters a cwd whose trust has not been resolved in the current process. Only user/global extensions and CLI `-e` extensions participate; project-local extensions are not loaded until after trust is resolved.
+Fired before NekoPal decides whether to trust a project with dynamic configs (`.nekopal` or
+`.agents/skills`). It runs during startup and when session replacement enters a working directory whose
+trust has not been resolved in the current process. Only user/global extensions participate;
+project-local extensions are not loaded until after trust is resolved.
 
 ```typescript
 pi.on("project_trust", async (event, ctx) => {
@@ -441,7 +447,12 @@ pi.on("project_trust", async (event, ctx) => {
 });
 ```
 
-A `project_trust` handler must return `{ trusted: "yes" | "no" | "undecided" }`. A user/global or CLI extension that returns `"yes"` or `"no"` owns the decision; the first yes/no decision wins and suppresses the built-in trust prompt. Use `remember: true` to persist a yes/no decision; otherwise it applies only to the current process. Return `"undecided"` to let later handlers or the built-in trust flow decide. Check `ctx.hasUI` before prompting. If no handler returns yes/no, normal trust resolution continues: saved `trust.json` decisions apply first, then `defaultProjectTrust` controls whether Pi asks, trusts, or declines by default.
+A `project_trust` handler must return `{ trusted: "yes" | "no" | "undecided" }`. A user/global
+extension that returns `"yes"` or `"no"` owns the decision; the first yes/no decision wins. Use
+`remember: true` to persist a yes/no decision; otherwise it applies only to the current process. Return
+`"undecided"` to let later handlers or the built-in flow decide. If no handler returns yes/no, saved
+`trust.json` decisions apply first, then `defaultProjectTrust` decides. The daemon has no interactive
+prompt, so an unresolved `"ask"` behaves as `"never"`.
 
 ### Resource Events
 
@@ -484,7 +495,7 @@ pi.on("session_start", async (event, ctx) => {
 
 #### session_info_changed
 
-Fired when the current session display name is set via `/name`, RPC, or `pi.setSessionName()`.
+Fired when the current session display name is set via `pi.setSessionName()`.
 
 ```typescript
 pi.on("session_info_changed", async (event, ctx) => {
@@ -495,7 +506,7 @@ pi.on("session_info_changed", async (event, ctx) => {
 
 #### session_before_switch
 
-Fired before starting a new session (`/new`) or switching sessions (`/resume`).
+Fired before starting a new session or switching sessions.
 
 ```typescript
 pi.on("session_before_switch", async (event, ctx) => {
@@ -509,12 +520,12 @@ pi.on("session_before_switch", async (event, ctx) => {
 });
 ```
 
-After a successful switch or new-session action, Pi emits `session_shutdown` for the old extension instance, reloads and rebinds extensions for the new session, then emits `session_start` with `reason: "new" | "resume"` and `previousSessionFile`.
+After a successful switch or new-session action, NekoPal emits `session_shutdown` for the old extension instance, reloads and rebinds extensions for the new session, then emits `session_start` with `reason: "new" | "resume"` and `previousSessionFile`.
 Do cleanup work in `session_shutdown`, then reestablish any in-memory state in `session_start`.
 
 #### session_before_fork
 
-Fired when forking via `/fork` or cloning via `/clone`.
+Fired when a session is forked or cloned.
 
 ```typescript
 pi.on("session_before_fork", async (event, ctx) => {
@@ -526,7 +537,7 @@ pi.on("session_before_fork", async (event, ctx) => {
 });
 ```
 
-After a successful fork or clone, Pi emits `session_shutdown` for the old extension instance, reloads and rebinds extensions for the new session, then emits `session_start` with `reason: "fork"` and `previousSessionFile`.
+After a successful fork or clone, NekoPal emits `session_shutdown` for the old extension instance, reloads and rebinds extensions for the new session, then emits `session_start` with `reason: "fork"` and `previousSessionFile`.
 Do cleanup work in `session_shutdown`, then reestablish any in-memory state in `session_start`.
 
 <a id="session_before_compact--session_compact"></a>
@@ -574,7 +585,7 @@ pi.on("session_compact_failed", async (event, ctx) => {
 
 #### session_before_tree / session_tree
 
-Fired on `/tree` navigation. See [Sessions](sessions.md) for tree navigation concepts.
+Fired on tree navigation. See [Sessions](sessions.md) for session concepts.
 
 ```typescript
 pi.on("session_before_tree", async (event, ctx) => {
@@ -654,7 +665,7 @@ pi.on("before_agent_start", async (event, ctx) => {
 
 A returned `message` is added to either kind of run; check `messageType` to skip runs started by custom messages.
 
-The `systemPromptOptions` field gives extensions access to the same structured data Pi uses to build the system prompt. Collections are mutable. Prefer changing `sections`, `selectedTools`, or `promptGuidelines`: Pi diffs the resulting prompt sections against what the model already has and appends one system message patching only the changed sections. Returning `systemPrompt`, or setting `forceSystemPrompt`, replaces the whole prompt for the run: every provider receives the forced text as its leading system prompt (a cache miss when it changes), and the session transcript keeps recording the structured sections. Tool selection changes update both the prompt contributions and executable provider tools; calling `pi.setActiveTools()` inside the handler has the same effect as editing `selectedTools`. Models that accept system messages mid-conversation receive the patch in place and keep their cached prefix; other models get the replayed prompt as their system prompt, which is a cache miss once per change.
+The `systemPromptOptions` field gives extensions access to the same structured data NekoPal uses to build the system prompt. Collections are mutable. Prefer changing `sections`, `selectedTools`, or `promptGuidelines`: NekoPal diffs the resulting prompt sections against what the model already has and appends one system message patching only the changed sections. Returning `systemPrompt`, or setting `forceSystemPrompt`, replaces the whole prompt for the run: every provider receives the forced text as its leading system prompt (a cache miss when it changes), and the session transcript keeps recording the structured sections. Tool selection changes update both the prompt contributions and executable provider tools; calling `pi.setActiveTools()` inside the handler has the same effect as editing `selectedTools`. Models that accept system messages mid-conversation receive the patch in place and keep their cached prefix; other models get the replayed prompt as their system prompt, which is a cache miss once per change.
 
 Inside `before_agent_start`, `event.systemPrompt` and `ctx.getSystemPrompt()` both reflect the chained system prompt as of the current handler. Later `before_agent_start` handlers can still modify it again.
 
@@ -662,7 +673,7 @@ Inside `before_agent_start`, `event.systemPrompt` and `ctx.getSystemPrompt()` bo
 
 #### agent_start / agent_end / agent_before_settle / agent_settled
 
-`agent_start` fires when a low-level agent run begins. `agent_end` fires when that run ends, but Pi may still auto-retry, auto-compact and retry, or continue with queued follow-up messages. `agent_before_settle` is the final actionable boundary: it can append session entries and request one continuation. `agent_settled` is final and notification-only; use it for status integrations that need to know Pi will not continue running automatically.
+`agent_start` fires when a low-level agent run begins. `agent_end` fires when that run ends, but NekoPal may still auto-retry, auto-compact and retry, or continue with queued follow-up messages. `agent_before_settle` is the final actionable boundary: it can append session entries and request one continuation. `agent_settled` is final and notification-only; use it for status integrations that need to know NekoPal will not continue running automatically.
 
 ```typescript
 pi.on("agent_start", async (_event, ctx) => {});
@@ -708,7 +719,7 @@ pi.on("ui_prompt_start", async (event, ctx) => {
 });
 
 pi.on("ui_prompt_end", async (event, ctx) => {
-  // Pi is no longer waiting on that UI prompt span.
+  // NekoPal is no longer waiting on that UI prompt span.
 });
 ```
 
@@ -745,7 +756,7 @@ pi.on("turn_end", async (event, ctx) => {
 
 `turn_end` runs after the assistant and tool-result messages have been persisted and before the low-level `turn_end` event. Retry backoff and final-attempt recovery still happen after `agent_end`, preserving their existing lifecycle and queue ordering; `agent_before_settle` sees the repaired projection after that work completes. Boundary handlers run in extension load and registration order. Each handler sees prior proposals in `event.entries` and sees `event.context` rebuilt from them. Returning `entries` or `continue` replaces only that field; omitted fields preserve the current proposal. Allowed draft entry types are `custom`, `custom_message`, `context_edit`, and `compaction`. The complete proposal is validated before it is appended in list order after all handlers finish; a handler error is reported and later handlers still run. Validation prevents partially applied semantic errors, but persistence is not transactional.
 
-`continue: true` ensures one next provider request for that boundary invocation. If tool results, steering, or a follow-up already cause that request, they satisfy the decision and no additional request is made; otherwise Pi makes one context-only request. Error and aborted responses remain hard exits. `continue: false` never suppresses natural work. Guard continuation conditions: an unconditional `continue: true` is evaluated again after the next response and can create an endless loop. A `custom_message` draft contributes a user-role model message but is extension-authored: it does not run human input hooks, slash commands, skills, or prompt templates.
+`continue: true` ensures one next provider request for that boundary invocation. If tool results, steering, or a follow-up already cause that request, they satisfy the decision and no additional request is made; otherwise NekoPal makes one context-only request. Error and aborted responses remain hard exits. `continue: false` never suppresses natural work. Guard continuation conditions: an unconditional `continue: true` is evaluated again after the next response and can create an endless loop. A `custom_message` draft contributes a user-role model message but is extension-authored: it does not run human input hooks, slash commands, skills, or prompt templates.
 
 Host integrations that construct `TurnEndEvent` values must provide `messageEntryId`, `toolResultEntryIds`, `outcome`, `entries`, `continue`, and `context`. `ExtensionEvent` exhaustive switches must also handle `agent_before_settle`. `ExtensionRunner.emit()` excludes actionable turn boundaries; dispatch `turn_end` and `agent_before_settle` through `emitBoundary(baseEvent, buildContext)` so handlers receive chained previews. Other dedicated runner methods still return results for events such as `session_before_*`.
 
@@ -824,11 +835,11 @@ pi.on("context", async (event, ctx) => {
 });
 ```
 
-`event.messages` holds the conversation without system messages. The prompt and tool declarations belong to Pi and are not part of this hook: when the handler returns a changed list, Pi replays the current prompt sections and tool declarations into one leading system message ahead of the returned messages. Filtering, windowing, or slicing from a compaction summary therefore cannot drop the prompt or the tools. An unchanged list keeps mid-conversation system messages in place, so models that accept them retain their cached prefix. System messages a handler adds are kept after Pi's head. To change the prompt or the tool set durably, use [`before_agent_start`](#before_agent_start) or `pi.setActiveTools()`; to edit system messages for one request, use [`context_with_system`](#context_with_system).
+`event.messages` holds the conversation without system messages. The prompt and tool declarations belong to the harness and are not part of this hook: when the handler returns a changed list, the harness replays the current prompt sections and tool declarations into one leading system message ahead of the returned messages. Filtering, windowing, or slicing from a compaction summary therefore cannot drop the prompt or the tools. An unchanged list keeps mid-conversation system messages in place, so models that accept them retain their cached prefix. System messages a handler adds are kept after the leading one. To change the prompt or the tool set durably, use [`before_agent_start`](#before_agent_start) or `pi.setActiveTools()`; to edit system messages for one request, use [`context_with_system`](#context_with_system).
 
 #### context_with_system
 
-Fired before each LLM call, after every `context` handler has run and Pi has restored the prompt and tool state. `event.messages` is the full transcript, including the leading system message and any mid-conversation prompt or tool patches (see [Session Format](session-format.md#sessionmessageentry)). The returned messages are sent as they are: this hook owns the prompt and tool declarations for the request.
+Fired before each LLM call, after every `context` handler has run and NekoPal has restored the prompt and tool state. `event.messages` is the full transcript, including the leading system message and any mid-conversation prompt or tool patches (see [Session Format](session-format.md#sessionmessageentry)). The returned messages are sent as they are: this hook owns the prompt and tool declarations for the request.
 
 ```typescript
 import { getCurrentSystemMessage } from "@earendil-works/pi-ai";
@@ -841,7 +852,7 @@ pi.on("context_with_system", async (event, ctx) => {
 });
 ```
 
-Rules: keep a system message at index 0 (providers read the prompt and initial tool declarations there; Pi reports an error if a handler drops it). Removing a system message removes the tool declarations and section patches it carries. Check your output with `getCurrentSystemPrompt()` and `getCurrentTools()` from `@earendil-works/pi-ai`. Handlers run in extension load order; a `systemPrompt` forced from `before_agent_start` is still projected onto the request afterwards.
+Rules: keep a system message at index 0 (providers read the prompt and initial tool declarations there; NekoPal reports an error if a handler drops it). Removing a system message removes the tool declarations and section patches it carries. Check your output with `getCurrentSystemPrompt()` and `getCurrentTools()` from `@earendil-works/pi-ai`. Handlers run in extension load order; a `systemPrompt` forced from `before_agent_start` is still projected onto the request afterwards.
 
 #### before_provider_headers
 
@@ -854,8 +865,8 @@ pi.on("before_provider_headers", (event, ctx) => {
   // Add or override — e.g. a session id for gateway tracing/attribution
   event.headers["x-session-id"] = ctx.sessionManager.getSessionId();
 
-  // Drop a tracking header pi adds for this call
-  event.headers["X-OpenRouter-Title"] = null;
+  // Drop a header for this call
+  event.headers["X-Provider-Debug"] = null;
 });
 ```
 
@@ -865,7 +876,7 @@ Runs once per provider request; retries reuse the same headers rather than re-fi
 
 Fired after the provider-specific payload is built, right before the request is sent. Handlers run in extension load order. Returning `undefined` keeps the payload unchanged. Returning any other value replaces the payload for later handlers and for the actual request.
 
-This hook can rewrite provider-level system instructions or remove them entirely. Those payload-level changes are not reflected by `ctx.getSystemPrompt()`, which reports Pi's system prompt string rather than the final serialized provider payload.
+This hook can rewrite provider-level system instructions or remove them entirely. Those payload-level changes are not reflected by `ctx.getSystemPrompt()`, which reports the harness's system prompt string rather than the final serialized provider payload.
 
 ```typescript
 pi.on("before_provider_request", (event, ctx) => {
@@ -898,12 +909,12 @@ Header availability depends on provider and transport. Providers that abstract H
 
 #### provider_stream_event
 
-Fired for each parsed provider stream event before Pi normalizes it. Notification-only and not persisted.
+Fired for each parsed provider stream event before it is normalized. Notification-only and not persisted.
 
 ```typescript
 pi.on("provider_stream_event", (event, ctx) => {
   // event.provider, event.api, event.model
-  // event.data - earliest structured value available to Pi (read-only)
+  // event.data - earliest structured value available to NekoPal (read-only)
 });
 ```
 
@@ -911,7 +922,7 @@ pi.on("provider_stream_event", (event, ctx) => {
 
 #### cache_warming_decision
 
-Fired before each prompt-cache refresh with Pi's decision filled in. The event carries only Pi's cost estimates; use `ctx.model`, `ctx.isIdle()`, and `ctx.getContextUsage()` for everything else.
+Fired before each prompt-cache refresh with the harness's decision filled in. The event carries only its cost estimates; use `ctx.model`, `ctx.isIdle()`, and `ctx.getContextUsage()` for everything else.
 
 ```typescript
 pi.on("cache_warming_decision", (event, ctx) => {
@@ -974,7 +985,7 @@ Use this to update extension UI when `pi.setThinkingLevel()`, model changes, or 
 
 Fired after `tool_execution_start`, before the tool executes. **Can block.** Use `isToolCallEventType` to narrow and get typed inputs.
 
-Before `tool_call` runs, Pi waits for previously emitted Agent events to finish draining through `AgentSession`. This means `ctx.sessionManager` is up to date through the current assistant tool-calling message.
+Before `tool_call` runs, NekoPal waits for previously emitted Agent events to finish draining through `AgentSession`. This means `ctx.sessionManager` is up to date through the current assistant tool-calling message.
 
 In the default parallel tool execution mode, sibling tool calls from the same assistant message are preflighted sequentially, then executed concurrently. `tool_call` is not guaranteed to see sibling tool results from that same assistant message in `ctx.sessionManager`.
 
@@ -1170,17 +1181,21 @@ UI methods for user interaction. See [Custom UI](#custom-ui) for full details.
 
 ### ctx.mode
 
-Current run mode: `"tui"`, `"rpc"`, `"json"`, or `"print"`. Use `ctx.mode === "tui"` to guard terminal-only features such as `custom()`, component factories, terminal input, and direct TUI rendering.
+Current run mode. NekoPal always binds extensions with `"rpc"`, so `ctx.mode === "tui"` is false and the
+non-TUI branch of a pi extension runs. The value can also be `"json"` or `"print"` when the harness is
+driven that way.
 
 ### ctx.hasUI
 
-`true` in TUI and RPC modes. `false` in print mode (`-p`) and JSON mode. Use this to guard dialog methods (`select`, `confirm`, `input`, `editor`) and fire-and-forget methods (`notify`, `setStatus`, `setWidget`, `setTitle`, `setEditorText`) that work in both TUI and RPC modes. In RPC mode, some TUI-specific methods are no-ops or return defaults (see [RPC Extension UI](rpc-extension-ui.md)).
+`true`. The daemon provides real `notify`, `select`, `confirm` and `input`: notifications become chat
+messages and dialogs become questions whose answer is your next message. Methods that need a terminal
+(`custom()`, component factories, terminal input) are no-ops.
 
 ### ctx.cwd
 
 Current working directory.
 
-Use `CONFIG_DIR_NAME` instead of hardcoding `.pi` when constructing project-local config paths. Rebranded distributions can use a different config directory name.
+Use `CONFIG_DIR_NAME` instead of hardcoding `.nekopal` when constructing project-local config paths.
 
 ```typescript
 import { CONFIG_DIR_NAME, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -1196,7 +1211,8 @@ export default function (pi: ExtensionAPI) {
 
 ### ctx.isProjectTrusted()
 
-Returns whether project-local trust is active for the current session context. This includes temporary trust decisions and CLI trust overrides, not just saved decisions in the global trust store.
+Returns whether project-local trust is active for the current session context. This includes temporary
+decisions from a `project_trust` handler, not just saved decisions in the global trust store.
 
 Use this before reading project-local extension configuration that should only be honored for trusted projects.
 
@@ -1217,7 +1233,11 @@ ctx.sessionManager.getLeafId()              // Current leaf entry ID
 
 Access to models, providers, and resolved authentication. `ctx.modelRegistry.getProvider(id)` returns the effective pi-ai provider, while `getProviderAuth(id)` resolves its current API key, headers, base URL, and provider-scoped environment without requiring a loaded model. `ctx.model` is the active model, and `ctx.thinkingLevel` is its current effective thinking level.
 
-`ctx.scopedModels` is the read-only list of models scoped to the current session — the same set the `/scoped-models` command shows. It is resolved at session start from the `--models` CLI flag and the `enabledModels` setting (matched against the available catalogue with minimatch on `provider/modelId` or a bare `modelId`). It is empty when no scoping is configured, meaning every available model is usable. Each entry is `{ model, thinkingLevel? }`, where `thinkingLevel` is set only when a pattern pinned it (e.g. `anthropic/*:high`). Use it to populate a model picker that mirrors the built-in one instead of enumerating the whole catalogue via `ctx.modelRegistry.getAvailable()`.
+`ctx.scopedModels` is the read-only list of models scoped to the current session. It is resolved at
+session start from the `enabledModels` setting (matched against the available catalogue with minimatch
+on `provider/modelId` or a bare `modelId`). It is empty when no scoping is configured, meaning every
+available model is usable. Each entry is `{ model, thinkingLevel? }`, where `thinkingLevel` is set only
+when a pattern pinned it (for example `anthropic/*:high`).
 
 #### Streaming model calls
 
@@ -1225,7 +1245,9 @@ Use `ctx.modelRegistry.streamSimple(model, context, options)` for provider-neutr
 
 `streamSimple()` returns an `AssistantMessageEventStream`. Iterate it for response events and await `.result()` for the final message. Setup failures produce error events and error results.
 
-For non-chat models, `findOfType()`, `getModelsOfType()`, `getAvailableOfType()`, and `getModelOfType()` look up image and classifier models, and `classify()` and `generateImages()` call them. See [Use classifier models](models.md#use-classifier-models) and [Use image models](models.md#use-image-models).
+For non-chat models, `findOfType()`, `getModelsOfType()`, `getAvailableOfType()`, and `getModelOfType()`
+look up classifier models, and `classify()` calls them. See
+[Use classifier models](models.md#use-classifier-models).
 
 ### ctx.signal
 
@@ -1237,7 +1259,7 @@ Use this for abort-aware nested work started by extension handlers, for example:
 - file or process helpers that accept `AbortSignal`
 
 `ctx.signal` is typically defined during active turn events such as `tool_call`, `tool_result`, `message_update`, and `turn_end`.
-It is usually `undefined` in idle or non-turn contexts such as session events, extension commands, and shortcuts fired while Pi is idle.
+It is usually `undefined` in idle or non-turn contexts such as session events, extension commands, and shortcuts fired while NekoPal is idle.
 
 ```typescript
 pi.on("tool_result", async (event, ctx) => {
@@ -1254,14 +1276,15 @@ pi.on("tool_result", async (event, ctx) => {
 
 ### ctx.isIdle() / ctx.abort() / ctx.hasPendingMessages()
 
-Control flow helpers. `ctx.isIdle()` is false while Pi is processing an agent run, automatic retry, auto-compaction retry, or queued continuation.
+Control flow helpers. `ctx.isIdle()` is false while NekoPal is processing an agent run, automatic retry, auto-compaction retry, or queued continuation.
 
 ### ctx.shutdown()
 
 Request a graceful shutdown of pi.
 
 - **Interactive mode:** Deferred until the agent becomes idle (after processing all queued steering and follow-up messages).
-- **RPC mode:** Runs right away when the session is idle and no command is being handled. Otherwise deferred until the current command finishes (including its response) or the active run settles. (A request made while an extension-started compaction is running waits for the next command or run to finish.)
+- **NekoPal:** Runs right away when the session is idle and no command is being handled. Otherwise it is
+  deferred until the current command finishes or the active run settles.
 - **Print mode:** No-op. The process exits automatically when all prompts are processed.
 
 Emits `session_shutdown` event to all extensions before exiting. Available in all contexts (event handlers, tools, commands, shortcuts).
@@ -1303,7 +1326,7 @@ ctx.compact({
 
 ### ctx.getSystemPrompt()
 
-Returns Pi's current system prompt string.
+Returns the current system prompt string.
 
 - During `before_agent_start`, this reflects chained system-prompt changes made so far for the current turn.
 - It does not include later `context` message mutations.
@@ -1323,7 +1346,7 @@ Command handlers receive `ExtensionCommandContext`, which extends `ExtensionCont
 
 ### ctx.getSystemPromptOptions()
 
-Returns the base inputs Pi currently uses to build the system prompt.
+Returns the base inputs NekoPal currently uses to build the system prompt.
 
 ```typescript
 const options = ctx.getSystemPromptOptions();
@@ -1513,7 +1536,7 @@ pi.registerCommand("handoff", {
 
 ### ctx.reload()
 
-Run the same reload flow as `/reload`.
+Run the same reload flow as a session reload.
 
 ```typescript
 pi.registerCommand("reload-runtime", {
@@ -1535,7 +1558,7 @@ Important behavior:
 
 For predictable behavior, treat reload as terminal for that handler (`await ctx.reload(); return;`).
 
-Tools run with `ExtensionToolContext`, not `ExtensionCommandContext`, so they cannot call `ctx.reload()`, and Pi cannot reload while the agent is running. To let the LLM trigger a reload, have the tool record the request and run the command from `agent_settled`, where messages sent by handlers are processed after all settled handlers finish:
+Tools run with `ExtensionToolContext`, not `ExtensionCommandContext`, so they cannot call `ctx.reload()`, and NekoPal cannot reload while the agent is running. To let the LLM trigger a reload, have the tool record the request and run the command from `agent_settled`, where messages sent by handlers are processed after all settled handlers finish:
 
 ```typescript
 let reloadRequested = false;
@@ -1548,7 +1571,7 @@ pi.registerTool({
   async execute() {
     reloadRequested = true;
     return {
-      content: [{ type: "text", text: "Reload requested. Pi reloads after this response." }],
+      content: [{ type: "text", text: "Reload requested. NekoPal reloads after this response." }],
       details: {},
       terminate: true,
     };
@@ -1583,7 +1606,7 @@ Handlers run in extension load order, then registration order within each extens
 
 Register a custom tool callable by the LLM. See [Custom Tools](#custom-tools) for full details.
 
-`pi.registerTool()` works both during extension load and after startup. You can call it inside `session_start`, command handlers, or other event handlers. New tools are refreshed immediately in the same session, so they appear in `pi.getAllTools()` without `/reload`. Registering a tool activates it unless it sets `defaultActive: false` or an [exposure](#tool-exposure) other than `direct` or `model-only`.
+`pi.registerTool()` works both during extension load and after startup. You can call it inside `session_start`, command handlers, or other event handlers. New tools are refreshed immediately in the same session, so they appear in `pi.getAllTools()` immediately. Registering a tool activates it unless it sets `defaultActive: false` or an [exposure](#tool-exposure) other than `direct` or `model-only`.
 
 Use `pi.setActiveTools()` to enable or disable tools (including dynamically added tools) at runtime.
 
@@ -1626,7 +1649,9 @@ pi.registerTool({
 
 ### pi.sendMessage(message, options?)
 
-Inject a custom message into the session. Custom messages participate in LLM context. For durable TUI-only content that should not be sent to the LLM, use [`pi.appendEntry()`](#piappendentrycustomtype-data) with [`pi.registerEntryRenderer()`](#piregisterentryrenderercustomtype-renderer).
+Inject a custom message into the session. Custom messages participate in LLM context. For durable
+content that should not be sent to the LLM, use [`pi.appendEntry()`](#piappendentrycustomtype-data)
+instead.
 
 ```typescript
 pi.sendMessage({
@@ -1676,7 +1701,7 @@ pi.sendUserMessage("/review src/index.ts", { expandPromptTemplates: true });
   - `"followUp"` - Waits for agent to finish all tools
 - `expandPromptTemplates` - Dispatch extension commands and expand skill commands and prompt templates. Defaults to `false`.
 
-When not streaming, the message is sent immediately and triggers a new turn. When streaming without `deliverAs`, the message is rejected and Pi reports an extension error.
+When not streaming, the message is sent immediately and triggers a new turn. When streaming without `deliverAs`, the message is rejected and NekoPal reports an extension error.
 
 See [send-user-message.ts](../examples/extensions/send-user-message.ts) for a complete example.
 
@@ -1719,7 +1744,7 @@ if (name) {
 
 ### pi.setLabel(entryId, label)
 
-Set or clear a label on an entry. Labels are user-defined markers for bookmarking and navigation (shown in `/tree` selector).
+Set or clear a label on an entry. Labels are user-defined markers for bookmarking and navigation.
 
 ```typescript
 // Set a label
@@ -1738,7 +1763,7 @@ Labels persist in the session and survive restarts. Use them to mark important p
 
 Register a command.
 
-If multiple extensions register the same command name, Pi keeps them all and assigns numeric invocation suffixes in load order, for example `/review:1` and `/review:2`.
+If multiple extensions register the same command name, NekoPal keeps them all and assigns numeric invocation suffixes in load order, for example `/review:1` and `/review:2`.
 
 ```typescript
 pi.registerCommand("stats", {
@@ -1750,14 +1775,13 @@ pi.registerCommand("stats", {
 });
 ```
 
-Optional: add argument auto-completion for `/command ...`. `getArgumentCompletions` can also return a `Promise`:
+Optional: add argument auto-completion for `/command ...`. `getArgumentCompletions` can also return a
+`Promise`. Each item is `{ value, label, description? }`:
 
 ```typescript
-import type { AutocompleteItem } from "@earendil-works/pi-tui";
-
 pi.registerCommand("deploy", {
   description: "Deploy to an environment",
-  getArgumentCompletions: (prefix: string): AutocompleteItem[] | null => {
+  getArgumentCompletions: (prefix: string) => {
     const envs = ["dev", "staging", "prod"];
     const items = envs.map((e) => ({ value: e, label: e }));
     const filtered = items.filter((i) => i.value.startsWith(prefix));
@@ -1772,7 +1796,7 @@ pi.registerCommand("deploy", {
 ### pi.getCommands()
 
 Get the slash commands available for invocation via `prompt` in the current session. Includes extension commands, prompt templates, and skill commands.
-The list matches the RPC `get_commands` ordering: extensions first, then templates, then skills. Skill commands are named `skill:<name>`.
+The order is extensions first, then templates, then skills. Skill commands are named `skill:<name>`.
 
 ```typescript
 const commands = pi.getCommands();
@@ -1799,32 +1823,36 @@ Each entry has this shape:
 
 Use `sourceInfo` as the canonical provenance field. Do not infer ownership from command names or from ad hoc path parsing.
 
-Built-in interactive commands (like `/model` and `/settings`) are not included here. They are handled only in interactive
-mode and would not execute if sent via `prompt`.
+NekoPal's own chat commands (`/model`, `/settings`, `/memory`, and the rest) are handled by the daemon,
+not the harness, so they never reach an extension's `input` handler and are not listed here. Extension
+commands, prompt templates, and skills are listed.
 
 ### pi.registerMessageRenderer(customType, renderer)
 
-Register a custom TUI renderer for custom messages with your `customType`. Custom messages are created with `pi.sendMessage()` and participate in LLM context. See [Custom UI](#custom-ui).
+Register a renderer for custom messages with your `customType`. The daemon collects the registration but
+does not render it; a custom message still participates in LLM context. See [Custom UI](#custom-ui).
 
 ### pi.registerMarkdownTransformer(transformer, options?)
 
-Register a transformer for Markdown before Pi renders it in interactive mode. Transformers run in extension load order, and each transformer receives the Markdown returned by the previous transformer. After the chain finishes, Pi renders the transformed content with its built-in renderer.
+Register a transformer for Markdown before it is rendered. The daemon does not use the terminal
+renderer, so transformers only affect a front end that does render Markdown; registration still works.
+Transformers run in extension load order, and each transformer receives the Markdown returned by the
+previous transformer.
 
 By default a transformer runs on normal user text, assistant text, and thinking blocks. `options.messageTypes` lists the surfaces it runs on instead:
 
 | `messageType` | Surface |
 |---------------|---------|
 | `"user"`, `"assistant"`, `"assistant-thinking"` | Transcript messages (default) |
-| `"custom"` | Custom messages from `pi.sendMessage()` without a registered message renderer, and expanded skill blocks (their content, without Pi's header) |
-| `"summary"` | Expanded branch and compaction summaries (the summary, without Pi's header) |
-| `"changelog"` | Pi's changelog ("What's New" at startup and `/changelog`), the startup "Extension Updates" notice, and the release note of the "Update Available" notice |
+| `"custom"` | Custom messages from `pi.sendMessage()` without a registered message renderer, and expanded skill blocks |
+| `"summary"` | Expanded branch and compaction summaries |
 
 The transformer receives the Markdown string and a context with:
 
 - `messageType` — one of the surfaces above
 - `isStreaming` — `true` for partial assistant updates; `false` otherwise
-- `availableWidth` — exact terminal columns available for the transformed Markdown content
-- `messageId`, `timestamp` — session-entry ID and ISO timestamp when rendering from persisted session entries; `undefined` for live messages and notices
+- `availableWidth` — columns available to the transformed Markdown
+- `messageId`, `timestamp` — session-entry ID and ISO timestamp when rendering from persisted session entries; `undefined` for live messages
 
 Return the transformed Markdown:
 
@@ -1834,29 +1862,25 @@ pi.registerMarkdownTransformer((markdown, { messageType, isStreaming }) => {
   return markdown.replaceAll("-->", "→");
 });
 
-// Show :warning: shortcodes in changelogs as a symbol.
+// Only touch custom messages.
 pi.registerMarkdownTransformer((markdown) => markdown.replaceAll(":warning:", "⚠"), {
-  messageTypes: ["changelog"],
+  messageTypes: ["custom"],
 });
 ```
 
-If a transformer throws, Pi keeps the Markdown produced so far and continues with the next transformer. The hook is display-only: the original message remains unchanged in the session and model context. It runs for new messages, assistant streaming updates, restored session messages, and terminal width changes, so transformers should remain synchronous and inexpensive. An extension has one transformer; registering again replaces it.
+If a transformer throws, the Markdown produced so far is kept and the next transformer runs. The hook
+is display-only: the original message remains unchanged in the session and model context. An extension
+has one transformer; registering again replaces it.
 
 ### pi.registerEntryRenderer(customType, renderer)
 
-Register a custom TUI renderer for custom entries with your `customType`. Custom entries are created with `pi.appendEntry()` and do not participate in LLM context.
+Register a renderer for custom entries with your `customType`. The daemon collects the registration but
+does not render it; the entry still persists in the session and does not participate in LLM context.
 
 ```typescript
-import { Box, Text } from "@earendil-works/pi-tui";
-
-pi.registerEntryRenderer("status-card", (entry, { expanded }, theme) => {
+pi.registerEntryRenderer("status-card", (entry) => {
   const data = entry.data as { title: string; count: number };
-  const box = new Box(1, 1, (text) => theme.bg("customMessageBg", text));
-  box.addChild(new Text(`${theme.bold(data.title)}: ${data.count}`));
-  if (expanded) {
-    box.addChild(new Text(theme.fg("dim", JSON.stringify(data, null, 2))));
-  }
-  return box;
+  return `${data.title}: ${data.count}`;
 });
 
 pi.appendEntry("status-card", { title: "Indexed files", count: 17 });
@@ -1864,7 +1888,8 @@ pi.appendEntry("status-card", { title: "Indexed files", count: 17 });
 
 ### pi.registerShortcut(shortcut, options)
 
-Register a keyboard shortcut. See [keybindings.md](keybindings.md) for the shortcut format and built-in keybindings.
+Register a keyboard shortcut. The daemon collects the registration but has no keyboard, so nothing
+invokes it; the call still succeeds so a pi extension loads unchanged.
 
 ```typescript
 pi.registerShortcut("ctrl+shift+p", {
@@ -1877,7 +1902,7 @@ pi.registerShortcut("ctrl+shift+p", {
 
 ### pi.registerFlag(name, options)
 
-Register a CLI flag.
+Register a flag.
 
 ```typescript
 pi.registerFlag("plan", {
@@ -1886,7 +1911,7 @@ pi.registerFlag("plan", {
   default: false,
 });
 
-// Check the value after loading; in the factory, getFlag() returns the default
+// The daemon passes no flag values, so getFlag() always returns the registered default.
 pi.on("session_start", () => {
   if (pi.getFlag("plan")) {
     // Plan mode enabled
@@ -1920,7 +1945,7 @@ const all = pi.getAllTools();
 //   exposure: "direct",
 //   sourceInfo: { path: "builtin:read", source: "builtin", scope: "temporary", origin: "top-level" }
 // }, ...]
-// Tools shipped with Pi: core tools and tools from built-in extensions such as builtin:mcp
+// Tools shipped with NekoPal: core tools and tools from built-in extensions such as builtin:mcp
 const shippedTools = all.filter((t) => t.sourceInfo.source === "builtin");
 // Tools from installed or local extensions
 const extensionTools = all.filter((t) => t.sourceInfo.source !== "builtin" && t.sourceInfo.source !== "sdk");
@@ -1931,7 +1956,7 @@ pi.setActiveTools(["read", "bash"]); // Only read and bash
 `pi.getAllTools()` returns `name`, `description`, `parameters`, `promptGuidelines`, `exposure`, `sourceInfo`, and, when set, `namespace`, `annotations`, and `reachesTools`.
 
 Typical `sourceInfo` values:
-- `source: "builtin"` for tools shipped with Pi: core tools (`path: "builtin:<tool>"`) and tools registered by built-in extensions such as `builtin:mcp` (`path: "builtin:<extension>"`)
+- `source: "builtin"` for tools shipped with NekoPal: core tools (`path: "builtin:<tool>"`) and tools registered by built-in extensions such as `builtin:mcp` (`path: "builtin:<extension>"`)
 - `source: "sdk"` for tools passed via `createAgentSession({ customTools })`
 - extension source metadata for tools registered by extensions
 
@@ -1975,9 +2000,13 @@ pi.events.emit("my:event", { ... });
 
 Register or override a model provider dynamically. Useful for proxies, custom endpoints, or team-wide model configurations.
 
-Calls made during the extension factory function are queued and applied once the runner initialises. Calls made after that — for example from a command handler following a user setup flow — take effect immediately without requiring a `/reload`.
+Calls made during the extension factory function are queued and applied once the runner initialises. Calls made after that — for example from a command handler following a user setup flow — take effect immediately.
 
-Dynamic providers can implement `refreshModels`. Pi calls it during model refresh, publishes the returned list synchronously through the provider, and passes the canonical credential/stored-catalog/network/signal context. The extension decides whether to persist catalog metadata through generation-checked `context.publish({ persist: entry })`; live servers such as llama.cpp can return models without persisting them.
+Dynamic providers can implement `refreshModels`. It runs during a model refresh; the returned list is
+published synchronously through the provider, with the canonical credential/stored-catalog/network/
+signal context. The extension decides whether to persist catalog metadata through generation-checked
+`context.publish({ persist: entry })`; a live server such as a local model runtime can return models
+without persisting them.
 
 `context.signal` is always a concrete signal and provider callbacks must pass it to blocking I/O. Public `ModelRuntime.refresh()` and `ModelRegistry.refresh()` calls accept an optional signal and are unbounded when it is omitted; extensions and applications choose their own deadlines. Cancellation stops the caller waiting even if a provider ignores the signal, but cooperation is still required to stop the underlying work.
 
@@ -2031,8 +2060,8 @@ pi.registerProvider("my-proxy", {
   ]
 });
 
-// Register a live llama.cpp catalog without persisting discovered models
-pi.registerProvider("llama.cpp", {
+// Register a live local catalog without persisting discovered models
+pi.registerProvider("local-llm", {
   baseUrl: "http://localhost:9931/v1",
   apiKey: "local",
   api: "openai-completions",
@@ -2101,7 +2130,7 @@ See [custom-provider.md](custom-provider.md) for advanced topics: custom streami
 
 Remove a previously registered provider and its models. Built-in models that were overridden by the provider are restored. Has no effect if the provider was not registered.
 
-Like `registerProvider`, this takes effect immediately when called after the initial load phase, so a `/reload` is not required.
+Like `registerProvider`, this takes effect immediately when called after the initial load phase.
 
 ```typescript
 pi.registerCommand("my-setup-teardown", {
@@ -2127,7 +2156,7 @@ Choose how calls to any tool are drawn, including tools that are not registered 
 ```typescript
 pi.registerToolRenderer((toolName, next) => {
   if (!toolName.startsWith("mcp__")) return next();
-  return next() ?? { renderCall: (args, theme) => new Text(theme.fg("toolTitle", toolName), 0, 0) };
+  return next() ?? { renderCall: (_args, theme) => ({ render: () => [theme.fg("toolTitle", toolName)] }) };
 });
 ```
 
@@ -2282,7 +2311,8 @@ pi.registerTool({
 
 **Result fields:** Every result, including partial results passed to `onUpdate`, needs model-facing `content` and a `details` value. Use `details: undefined` when there is nothing to store; the type of `details` must match across all results of the tool.
 
-**Usage accounting:** If a tool makes nested LLM calls, return their combined `Usage` as `usage`. Pi persists it on the tool result and includes it in footer, `/session`, and RPC session totals. `tool_result` handlers can inspect or replace this value.
+**Usage accounting:** If a tool makes nested LLM calls, return their combined `Usage` as `usage`. It is
+persisted on the tool result and included in session totals. `tool_result` handlers can inspect or replace this value.
 
 **Signaling errors:** To mark a tool execution as failed, throw an error from `execute`, or return a result with `isError: true`. Both report an error result to the LLM; a returned result also keeps `details` and `structuredContent` for rendering and scripts. Other returned values never set the error flag.
 
@@ -2315,7 +2345,7 @@ async execute(toolCallId, params) {
 
 Use `defineTool()` to keep parameter type inference when you assign a tool definition to a variable before registering it.
 
-**Argument preparation:** `prepareArguments(args)` is optional. If defined, it runs before schema validation and before `execute()`. Use it to mimic an older accepted input shape when Pi resumes an older session whose stored tool call arguments no longer match the current schema. Return the object you want validated against `parameters`. Keep the public schema strict. Do not add deprecated compatibility fields to `parameters` just to keep old resumed sessions working.
+**Argument preparation:** `prepareArguments(args)` is optional. If defined, it runs before schema validation and before `execute()`. Use it to mimic an older accepted input shape when NekoPal resumes an older session whose stored tool call arguments no longer match the current schema. Return the object you want validated against `parameters`. Keep the public schema strict. Do not add deprecated compatibility fields to `parameters` just to keep old resumed sessions working.
 
 Example: an older session may contain an `edit` tool call with top-level `oldText` and `newText`, while the current schema only accepts `edits: [{ oldText, newText }]`.
 
@@ -2359,20 +2389,17 @@ pi.registerTool({
 
 Extensions can override built-in tools (`read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, `ls`) by registering a tool with the same name. The extension tool replaces the built-in without a warning.
 
-```bash
-# Extension's read tool replaces built-in read
-pi -e ./tool-override.ts
-```
+Place the extension in `~/.nekopal/extensions/` and restart the daemon.
 
-Alternatively, use `--no-builtin-tools` to start without any built-in tools while keeping extension tools enabled:
-```bash
-# No built-in tools, only extension tools
-pi --no-builtin-tools -e ./my-extension.ts
-```
+To start without any built-in tools while keeping extension tools enabled, set
+`defaultTools = []` in [settings](settings.md#tools).
 
 See [examples/extensions/tool-override.ts](../examples/extensions/tool-override.ts) for a complete example that overrides `read` with logging and access control.
 
-**Rendering:** Built-in renderer inheritance is resolved per slot. Execution override and rendering override are independent. If your override omits `renderCall`, the built-in `renderCall` is used. If your override omits `renderResult`, the built-in `renderResult` is used. If your override omits both, the built-in renderer is used automatically (syntax highlighting, diffs, etc.). This lets you wrap built-in tools for logging or access control without reimplementing the UI.
+**Rendering:** Renderer inheritance is resolved per slot. Execution override and rendering override are
+independent. If your override omits `renderCall`, the built-in one is used, and likewise for
+`renderResult`. This lets you wrap built-in tools for logging or access control without reimplementing
+rendering.
 
 **Prompt metadata:** `promptSnippet` and `promptGuidelines` are not inherited from the built-in tool. If your override should keep those prompt instructions, define them on the override explicitly.
 
@@ -2422,7 +2449,7 @@ The `create*ToolDefinition()` factories, such as `createReadToolDefinition()`, r
 
 `GrepOperations` only covers the directory check: grep always runs the local `rg`. To search a remote system, override grep's `execute()` instead, as the [Gondolin example](../examples/extensions/gondolin/index.ts) does.
 
-For `user_bash`, extensions can reuse Pi's local shell backend via `createLocalBashOperations()` (or `createLocalPowerShellOperations()`) instead of reimplementing local process spawning, shell resolution, and process-tree termination.
+For `user_bash`, extensions can reuse NekoPal's local shell backend via `createLocalBashOperations()` (or `createLocalPowerShellOperations()`) instead of reimplementing local process spawning, shell resolution, and process-tree termination.
 
 The `bash` and `powershell` tools also support a spawn hook to adjust the command, cwd, or env before execution:
 
@@ -2522,11 +2549,12 @@ export default function (pi: ExtensionAPI) {
 
 ### Custom Rendering
 
-Tools can provide `renderCall` and `renderResult` for custom TUI display. See [tui.md](tui.md) for the full component API and [tool-execution.ts](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/modes/interactive/components/tool-execution.ts) for how tool rows are composed.
+Tools can provide `renderCall` and `renderResult`. The daemon has no terminal, so it collects these
+functions and never calls them; the tool's text output is what reaches the chat. Declaring them keeps a
+pi extension loading unchanged, and a front end built on the SDK can use them.
 
-By default, tool output is wrapped in a `Box` that handles background and horizontal padding from the `outputPad` setting. Tool renderers are also used in HTML exports. A defined `renderCall` or `renderResult` must return a `Component`. If a slot renderer is not defined, `tool-execution.ts` uses fallback rendering for that slot.
-
-Set `renderShell: "self"` when the tool should render its own shell instead of using the default `Box`. This is useful for tools that need complete control over framing or background behavior, for example large previews that must stay visually stable after the tool settles.
+`renderCall` and `renderResult` return a `Component`: an object with `render(width): string[]` and an
+optional `invalidate()`. `renderShell: "self"` marks a renderer that draws its own framing.
 
 ```typescript
 pi.registerTool({
@@ -2538,40 +2566,22 @@ pi.registerTool({
   async execute() {
     return { content: [{ type: "text", text: "ok" }], details: undefined };
   },
-  renderCall(args, theme, context) {
-    return new Text(theme.fg("accent", "my custom shell"), 0, 0);
+  renderCall(_args, theme) {
+    return { render: () => [theme.fg("accent", "my custom shell")] };
   },
 });
 ```
-
-`renderCall` and `renderResult` each receive a `context` object with:
-- `args` - the current tool call arguments
-- `state` - shared row-local state across `renderCall` and `renderResult`
-- `lastComponent` - the previously returned component for that slot, if any
-- `invalidate()` - request a rerender of this tool row
-- `toolCallId`, `cwd`, `executionStarted`, `argsComplete`, `isPartial`, `expanded`, `showImages`, `isError`
-- `durationMs` - how long execution took, from the final result; `undefined` while running
-- `outputPad` - horizontal padding from the `outputPad` setting; renderers with `renderShell: "self"` apply it themselves
-- `keyText()`, `keyHint()` - format the user's configured keybindings, see [Keybinding Hints](#keybinding-hints)
-
-Use `context.state` for cross-slot shared state. Keep slot-local caches on the returned component instance when you want to reuse and mutate the same component across renders.
 
 #### renderCall
 
 Renders the tool call or header:
 
 ```typescript
-import { Text } from "@earendil-works/pi-tui";
-
-renderCall(args, theme, context) {
-  const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+renderCall(args, theme) {
   let content = theme.fg("toolTitle", theme.bold("my_tool "));
   content += theme.fg("muted", args.action);
-  if (args.text) {
-    content += " " + theme.fg("dim", `"${args.text}"`);
-  }
-  text.setText(content);
-  return text;
+  if (args.text) content += " " + theme.fg("dim", `"${args.text}"`);
+  return { render: () => [content] };
 }
 ```
 
@@ -2580,77 +2590,44 @@ renderCall(args, theme, context) {
 Renders the tool result or output:
 
 ```typescript
-renderResult(result, { expanded, isPartial }, theme, context) {
-  if (isPartial) {
-    return new Text(theme.fg("warning", "Processing..."), 0, 0);
-  }
-
+renderResult(result, { expanded, isPartial }, theme) {
+  if (isPartial) return { render: () => [theme.fg("warning", "Processing...")] };
   if (result.details?.error) {
-    return new Text(theme.fg("error", `Error: ${result.details.error}`), 0, 0);
+    return { render: () => [theme.fg("error", `Error: ${result.details.error}`)] };
   }
 
-  let text = theme.fg("success", "✓ Done");
+  const lines = [theme.fg("success", "✓ Done")];
   if (expanded && result.details?.items) {
-    for (const item of result.details.items) {
-      text += "\n  " + theme.fg("dim", item);
-    }
+    for (const item of result.details.items) lines.push("  " + theme.fg("dim", item));
   }
-  return new Text(text, 0, 0);
+  return { render: () => lines };
 }
 ```
 
-If a slot intentionally has no visible content, return an empty `Component` such as an empty `Container`.
+If a slot intentionally has no visible content, return `{ render: () => [] }`.
 
-#### Keybinding Hints
+#### Render context
 
-Use `keyHint()` and `keyText()` from the render context to display keybinding hints that respect the user's keybinding configuration:
-
-```typescript
-renderResult(result, { expanded }, theme, context) {
-  let text = theme.fg("success", "✓ Done");
-  if (!expanded) {
-    text += ` (${context.keyHint("app.tools.expand", "to expand")})`;
-  }
-  return new Text(text, 0, 0);
-}
-```
-
-The same functions are available as `options.keyHint()`/`options.keyText()` in message and entry renderers:
-
-- `keyHint(keybinding, description)` - Formats a configured keybinding id such as `"app.tools.expand"` or `"tui.select.confirm"`, followed by the description
-- `keyText(keybinding)` - Returns the raw configured key text for a keybinding id, or `""` if the id has no keys
-
-In renderers, use these instead of importing `keyHint()` or `keyText()` from `@earendil-works/pi-coding-agent`. An extension can resolve its own copy of the package, for example from its own `node_modules`, and that copy does not see pi's configured keybindings: `app.*` ids then format as `""`. `rawKeyHint(key, description)` formats a literal key string and is safe to import.
-
-Use namespaced keybinding ids:
-- Coding-agent ids use the `app.*` namespace, for example `app.tools.expand`, `app.editor.external`, `app.session.rename`
-- Shared TUI ids use the `tui.*` namespace, for example `tui.select.confirm`, `tui.select.cancel`, `tui.input.tab`
-
-For the exhaustive list of keybinding ids and defaults, see [keybindings.md](keybindings.md). `keybindings.json` uses those same namespaced ids.
-
-Custom editors and `ctx.ui.custom()` components receive `keybindings: KeybindingsManager` as an injected argument. They should use that injected manager directly instead of calling `getKeybindings()` or `setKeybindings()`.
+`renderCall` and `renderResult` receive a `context` object with the tool call arguments (`args`), a
+shared row-local `state`, the previous component for that slot (`lastComponent`), an `invalidate()`
+function, and the call metadata (`toolCallId`, `cwd`, `executionStarted`, `argsComplete`, `isPartial`,
+`expanded`, `showImages`, `isError`, `durationMs`).
 
 #### Best Practices
 
-- Use `Text` with padding `(0, 0)`. The default Box handles padding.
-- Use `\n` for multi-line content.
+- Return one string per line from `render`.
 - Handle `isPartial` for streaming progress.
 - Support `expanded` for detail on demand.
-- Keep default view compact.
-- Read `context.args` in `renderResult` instead of copying args into `context.state`.
-- Use `context.state` only for data that must be shared across call and result slots.
-- Reuse `context.lastComponent` when the same component instance can be updated in place.
-- Use `renderShell: "self"` only when the default boxed shell gets in the way. In self-shell mode the tool is responsible for its own framing, padding, and background.
+- Keep the default view compact.
 
 #### Fallback
 
-If a slot renderer is not defined or throws:
-- `renderCall`: Shows the tool name
-- `renderResult`: Shows raw text from `content`
+If a slot renderer is not defined or throws, the daemon ignores it. The chat shows the tool's text
+output.
 
 ### Dynamic Tool Loading
 
-Extensions can register many tools while keeping only a small initial set active. A tool can then change the active set with `pi.setActiveTools()` during execution. Pi stores the initial prompt and tool loadout in the transcript's first system message, then appends tool and prompt deltas before the next model request. Providers that cannot represent a transition receive a complete transcript checkpoint, which may invalidate the cached prefix.
+Extensions can register many tools while keeping only a small initial set active. A tool can then change the active set with `pi.setActiveTools()` during execution. NekoPal stores the initial prompt and tool loadout in the transcript's first system message, then appends tool and prompt deltas before the next model request. Providers that cannot represent a transition receive a complete transcript checkpoint, which may invalidate the cached prefix.
 
 The lifecycle is:
 
@@ -2658,7 +2635,7 @@ The lifecycle is:
 2. Keep loader tools, such as `search_tools`, active.
 3. During loader execution, call `pi.setActiveTools()` with the desired active tool names. Names must already be registered; unknown and `hidden` names are ignored.
 
-Pi also ships a built-in `tool_search` tool. Register tools with `exposure: "deferred"` to make them findable by it instead of writing your own loader; see [Tool Exposure](#tool-exposure).
+NekoPal also ships a built-in `tool_search` tool. Register tools with `exposure: "deferred"` to make them findable by it instead of writing your own loader; see [Tool Exposure](#tool-exposure).
 
 #### Search tool example
 
@@ -2791,7 +2768,7 @@ A tool that reaches other tools declares which ones a call may reach with `reach
 
 A tool can run other tools with `ctx.executeTool(name, args, { signal, onUpdate })`. `ctx.tools` lists the tools it can call. The call never rejects for tool failures: unknown tools, validation errors, blocked calls, and thrown errors come back as results with `isError: true`.
 
-Nested calls go through argument validation and the `tool_call` and `tool_result` handlers like model-issued calls, and emit `tool_execution_start`, `tool_execution_update`, and `tool_execution_end`. All of these events carry `parentToolCallId`, and their `toolCallId` is assigned by Pi as `<parent id>/<n>`. These IDs do not appear as tool calls or tool results in the transcript.
+Nested calls go through argument validation and the `tool_call` and `tool_result` handlers like model-issued calls, and emit `tool_execution_start`, `tool_execution_update`, and `tool_execution_end`. All of these events carry `parentToolCallId`, and their `toolCallId` is assigned by NekoPal as `<parent id>/<n>`. These IDs do not appear as tool calls or tool results in the transcript.
 
 Nested calls do not add transcript entries: their results only reach the calling tool, which reports them itself, for example through `onUpdate` and `details`. The session keeps a bounded record of them (name, arguments, status, duration, error; never results) as `nestedCalls` on the calling tool's result message. It is used for compaction file lists and shown in HTML exports. Arguments over 8 KiB per call or 32 KiB per tool result are omitted, at most 256 calls are kept, and `complete: false` marks a record that lost anything.
 
@@ -2814,438 +2791,67 @@ The built-in MCP support connects registered servers. When nothing does, because
 
 ## Custom UI
 
-Extensions can interact with users via `ctx.ui` methods and customize how messages/tools render.
+Extensions interact with users through `ctx.ui`. NekoPal backs the dialog and notification methods with
+the chat: `notify` sends a message, `select` and `input` ask a question whose answer is your next chat
+message, and `confirm` accepts `y`, `yes`, `是` or `好`. A question times out after ten minutes and
+returns `undefined` (or `false` for `confirm`).
 
-For custom components, focus, overlays, themes, and rendering performance, see [Terminal UI](tui.md). The examples it lists show selection lists, settings toggles, cancellable loaders, footers, and widgets.
+Methods that need a terminal — `custom()`, component factories, editor and footer setters, autocomplete
+providers, terminal input — are accepted and recorded so a pi extension loads unchanged, but nothing
+renders them. `ctx.ui.theme` returns a plain theme whose methods return the text unchanged, so
+`theme.fg("accent", text)` still produces readable text.
 
 ### Dialogs
 
 ```typescript
-// Select from options
+// Select from options; the answer is the option text or its 1-based number
 const choice = await ctx.ui.select("Pick one:", ["A", "B", "C"]);
 
-// Confirm dialog
-const ok = await ctx.ui.confirm("Delete?", "This cannot be undone");
+// Confirm; the answer is y/yes/是/好 for true
+const ok = await ctx.ui.confirm("Delete files?", "This cannot be undone.");
 
-// Text input
-const name = await ctx.ui.input("Name:", "placeholder");
+// Free text; the answer is the next chat message
+const name = await ctx.ui.input("Project name:", "my-project");
 
-// Multi-line editor
-const text = await ctx.ui.editor("Edit:", "prefilled text");
-
-// Notification (non-blocking)
-ctx.ui.notify("Done!", "info");  // "info" | "warning" | "error"
+// Notification; `warning` and `error` add a prefix
+ctx.ui.notify("Done!", "info");
+ctx.ui.notify("Careful", "warning");
 ```
 
-#### Timed Dialogs with Countdown
+`select` and `input` return `undefined` when the question times out or the user sends `/cancel`.
+`confirm` returns `false` in those cases.
 
-Dialogs support a `timeout` option that auto-dismisses with a live countdown display:
+### Status and widgets
 
-```typescript
-// Dialog shows "Title (5s)" → "Title (4s)" → ... → auto-dismisses at 0
-const confirmed = await ctx.ui.confirm(
-  "Timed Confirmation",
-  "This dialog will auto-cancel in 5 seconds. Confirm?",
-  { timeout: 5000 }
-);
-
-if (confirmed) {
-  // User confirmed
-} else {
-  // User cancelled or timed out
-}
-```
-
-**Return values on timeout:**
-- `select()` returns `undefined`
-- `confirm()` returns `false`
-- `input()` returns `undefined`
-
-#### Manual Dismissal with AbortSignal
-
-For more control (e.g., to distinguish timeout from user cancel), use `AbortSignal`:
+`setStatus(key, text)` stores a line that the daemon appends to the progress message while a reply runs.
+`setWidget(key, lines)` does the same with the lines joined by ` | `. Passing `undefined` clears the
+entry; a widget given as a function is ignored.
 
 ```typescript
-const controller = new AbortController();
-const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-const confirmed = await ctx.ui.confirm(
-  "Timed Confirmation",
-  "This dialog will auto-cancel in 5 seconds. Confirm?",
-  { signal: controller.signal }
-);
-
-clearTimeout(timeoutId);
-
-if (confirmed) {
-  // User confirmed
-} else if (controller.signal.aborted) {
-  // Dialog timed out
-} else {
-  // User cancelled (pressed Escape or selected "No")
-}
-```
-
-See [examples/extensions/timed-confirm.ts](../examples/extensions/timed-confirm.ts) for complete examples.
-
-### Widgets, Status, and Footer
-
-```typescript
-// Status in footer (persistent until cleared)
 ctx.ui.setStatus("my-ext", "Processing...");
 ctx.ui.setStatus("my-ext", undefined);  // Clear
 
-// Working loader (shown during streaming)
-ctx.ui.setWorkingMessage("Thinking deeply...");
-ctx.ui.setWorkingMessage();  // Restore default
-ctx.ui.setWorkingVisible(false);  // Hide the built-in working loader row entirely
-ctx.ui.setWorkingVisible(true);   // Show the built-in working loader row
-
-// Working indicator (shown during streaming)
-ctx.ui.setWorkingIndicator({ frames: [ctx.ui.theme.fg("accent", "●")] });  // Static dot
-ctx.ui.setWorkingIndicator({
-  frames: [
-    ctx.ui.theme.fg("dim", "·"),
-    ctx.ui.theme.fg("muted", "•"),
-    ctx.ui.theme.fg("accent", "●"),
-    ctx.ui.theme.fg("muted", "•"),
-  ],
-  intervalMs: 120,
-});
-ctx.ui.setWorkingIndicator({ frames: [] });  // Hide indicator
-ctx.ui.setWorkingIndicator();  // Restore default spinner
-
-// Widget above editor (default)
-ctx.ui.setWidget("my-widget", ["Line 1", "Line 2"]);
-// Widget below editor
-ctx.ui.setWidget("my-widget", ["Line 1", "Line 2"], { placement: "belowEditor" });
-ctx.ui.setWidget("my-widget", (tui, theme) => new Text(theme.fg("accent", "Custom"), 0, 0));
-ctx.ui.setWidget("my-widget", undefined);  // Clear
-
-// Custom footer (replaces built-in footer entirely)
-// footerData provides the git branch and extension statuses from setStatus()
-ctx.ui.setFooter((tui, theme, footerData) => ({
-  render(width) { return [theme.fg("dim", "Custom footer")]; },
-  invalidate() {},
-}));
-ctx.ui.setFooter(undefined);  // Restore built-in footer
-
-// Custom header shown at startup above the chat
-ctx.ui.setHeader((tui, theme) => new Text(theme.fg("accent", "my-project"), 0, 0));
-ctx.ui.setHeader(undefined);  // Restore built-in header
-
-// Label shown for hidden thinking blocks
-ctx.ui.setHiddenThinkingLabel("Reasoning...");
-ctx.ui.setHiddenThinkingLabel();  // Restore default
-
-// Raw terminal input (interactive mode only); return { consume: true } to swallow it
-const unsubscribe = ctx.ui.onTerminalInput((data) => undefined);
-
-// Terminal title
-ctx.ui.setTitle("pi - my-project");
-
-// Editor text
-ctx.ui.setEditorText("Prefill text");
-const current = ctx.ui.getEditorText();
-
-// Paste into editor (triggers paste handling, including collapse for large content)
-ctx.ui.pasteToEditor("pasted content");
-
-// Stack custom autocomplete behavior on top of the built-in provider
-ctx.ui.addAutocompleteProvider((current) => ({
-  triggerCharacters: ["#"],
-  async getSuggestions(lines, line, col, options) {
-    const beforeCursor = (lines[line] ?? "").slice(0, col);
-    const match = beforeCursor.match(/(?:^|[ \t])#([^\s#]*)$/);
-    if (!match) {
-      return current.getSuggestions(lines, line, col, options);
-    }
-
-    return {
-      prefix: `#${match[1] ?? ""}`,
-      items: [{ value: "#2983", label: "#2983", description: "Extension API for autocomplete" }],
-    };
-  },
-  applyCompletion(lines, line, col, item, prefix) {
-    return current.applyCompletion(lines, line, col, item, prefix);
-  },
-  shouldTriggerFileCompletion(lines, line, col) {
-    return current.shouldTriggerFileCompletion?.(lines, line, col) ?? true;
-  },
-}));
-
-// Tool output expansion
-const wasExpanded = ctx.ui.getToolsExpanded();
-ctx.ui.setToolsExpanded(true);
-ctx.ui.setToolsExpanded(wasExpanded);
-
-// Custom editor (vim mode, emacs mode, etc.)
-ctx.ui.setEditorComponent((tui, theme, keybindings) => new VimEditor(tui, theme, keybindings));
-const currentEditor = ctx.ui.getEditorComponent();
-ctx.ui.setEditorComponent((tui, theme, keybindings) =>
-  new WrappedEditor(tui, theme, keybindings, currentEditor?.(tui, theme, keybindings))
-);
-ctx.ui.setEditorComponent(undefined);  // Restore default editor
-
-// Theme management (see themes.md for creating themes)
-const themes = ctx.ui.getAllThemes();  // [{ name: "dark", path: "/..." | undefined }, ...]
-const lightTheme = ctx.ui.getTheme("light");  // Load without switching
-const result = ctx.ui.setTheme("light");  // Switch by name
-if (!result.success) {
-  ctx.ui.notify(`Failed: ${result.error}`, "error");
-}
-ctx.ui.setTheme(lightTheme!);  // Or switch by Theme object
-ctx.ui.theme.fg("accent", "styled text");  // Access current theme
+ctx.ui.setWidget("my-ext", ["Line 1", "Line 2"]);
+ctx.ui.setWidget("my-ext", undefined);  // Clear
 ```
 
-Custom working-indicator frames are rendered verbatim. If you want colors, add them to the frame strings yourself, for example with `ctx.ui.theme.fg(...)`.
+These calls never send a message of their own: they only change the progress line of the reply that is
+currently running.
 
-### Autocomplete Providers
+### Accepted but not rendered
 
-Use `ctx.ui.addAutocompleteProvider()` to stack custom autocomplete logic on top of the built-in slash-command and path provider. Set `triggerCharacters` for custom natural triggers such as `$`.
+These methods exist so an extension written for pi keeps loading. They return immediately and have no
+visible effect:
 
-Typical pattern:
-
-- inspect the text before the cursor
-- return your own suggestions when your extension-specific syntax matches
-- otherwise delegate to `current.getSuggestions(...)`
-- delegate `applyCompletion(...)` unless you need custom insertion behavior
-
-```typescript
-pi.on("session_start", (_event, ctx) => {
-  ctx.ui.addAutocompleteProvider((current) => ({
-    triggerCharacters: ["#"],
-    async getSuggestions(lines, cursorLine, cursorCol, options) {
-      const line = lines[cursorLine] ?? "";
-      const beforeCursor = line.slice(0, cursorCol);
-      const match = beforeCursor.match(/(?:^|[ \t])#([^\s#]*)$/);
-      if (!match) {
-        return current.getSuggestions(lines, cursorLine, cursorCol, options);
-      }
-
-      return {
-        prefix: `#${match[1] ?? ""}`,
-        items: [
-          { value: "#2983", label: "#2983", description: "Extension API for registering custom @ autocomplete providers" },
-          { value: "#2753", label: "#2753", description: "Reload stale resource settings" },
-        ],
-      };
-    },
-
-    applyCompletion(lines, cursorLine, cursorCol, item, prefix) {
-      return current.applyCompletion(lines, cursorLine, cursorCol, item, prefix);
-    },
-
-    shouldTriggerFileCompletion(lines, cursorLine, cursorCol) {
-      return current.shouldTriggerFileCompletion?.(lines, cursorLine, cursorCol) ?? true;
-    },
-  }));
-});
-```
-
-See [github-issue-autocomplete.ts](../examples/extensions/github-issue-autocomplete.ts) for a complete example that preloads the latest open GitHub issues with `gh issue list` and filters them locally for fast `#...` completion. It requires GitHub CLI (`gh`) and a GitHub repository checkout.
-
-### Custom Components
-
-For complex UI, use `ctx.ui.custom()`. This temporarily replaces the editor with your component until `done()` is called:
-
-```typescript
-import { truncateToWidth } from "@earendil-works/pi-tui";
-
-const result = await ctx.ui.custom<boolean>((tui, theme, keybindings, done) => ({
-  render(width: number): string[] {
-    return [truncateToWidth(theme.fg("accent", "Press Enter to confirm, Escape to cancel"), width)];
-  },
-  handleInput(data: string): void {
-    if (keybindings.matches(data, "tui.select.confirm")) done(true);
-    else if (keybindings.matches(data, "tui.select.cancel")) done(false);
-  },
-  invalidate() {},
-}));
-
-if (result) {
-  // User pressed Enter
-}
-```
-
-The callback receives:
-- `tui` - TUI instance (for screen dimensions, focus management)
-- `theme` - Current theme for styling
-- `keybindings` - App keybinding manager (for checking shortcuts)
-- `done(value)` - Call to close component and return value
-
-The factory can also return a `Promise` of a component. See [Terminal UI](tui.md#build-a-minimal-custom-screen) for a complete custom screen with cached rendering.
-
-#### Overlay Mode (Experimental)
-
-Pass `{ overlay: true }` to render the component as a floating modal on top of existing content, without clearing the screen:
-
-```typescript
-const result = await ctx.ui.custom<string | null>(
-  (tui, theme, keybindings, done) => new MyOverlayComponent({ onClose: done }),
-  { overlay: true }
-);
-```
-
-For advanced positioning (anchors, margins, percentages, responsive visibility), pass `overlayOptions`. Use `onHandle` to control focus or visibility programmatically:
-
-```typescript
-const result = await ctx.ui.custom<string | null>(
-  (tui, theme, keybindings, done) => new MyOverlayComponent({ onClose: done }),
-  {
-    overlay: true,
-    overlayOptions: { anchor: "top-right", width: "50%", margin: 2 },
-    onHandle: (handle) => {
-      handle.focus(); // focus this overlay and bring it to the visual front
-      // handle.unfocus({ target: editorComponent }); // release input to a specific component
-      // handle.setHidden(true/false); // toggle visibility
-      // handle.isHidden(), handle.isFocused(), handle.getBounds()
-    }
-  }
-);
-```
-
-`overlayOptions` can also be a function, re-evaluated for dynamic positioning. Finish the interaction with `done()`; do not call `handle.hide()` on an overlay created by `ctx.ui.custom()`.
-
-A focused visible overlay can reclaim input after temporary non-overlay custom UI closes. If you intentionally want another component to keep input while the overlay stays visible, call `handle.unfocus({ target })`. Passing `{ target: null }` releases the overlay without focusing another component.
-
-See [`OverlayOptions` and `OverlayHandle`](https://github.com/earendil-works/pi/blob/main/packages/tui/src/tui.ts) for the full API and [overlay-qa-tests.ts](../examples/extensions/overlay-qa-tests.ts) for examples.
-
-### Custom Editor
-
-Replace the main input editor with a custom implementation (vim mode, emacs mode, etc.):
-
-```typescript
-import { CustomEditor, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { matchesKey } from "@earendil-works/pi-tui";
-
-class VimEditor extends CustomEditor {
-  private mode: "normal" | "insert" = "insert";
-
-  handleInput(data: string): void {
-    if (matchesKey(data, "escape") && this.mode === "insert") {
-      this.mode = "normal";
-      return;
-    }
-    if (this.mode === "normal" && data === "i") {
-      this.mode = "insert";
-      return;
-    }
-    super.handleInput(data);  // App keybindings + text editing
-  }
-}
-
-export default function (pi: ExtensionAPI) {
-  pi.on("session_start", (_event, ctx) => {
-    ctx.ui.setEditorComponent((tui, theme, keybindings) =>
-      new VimEditor(tui, theme, keybindings)
-    );
-  });
-}
-```
-
-**Key points:**
-- Extend `CustomEditor` (not base `Editor`) to get app keybindings (escape to abort, ctrl+d, model switching)
-- Call `super.handleInput(data)` for keys you don't handle
-- Custom editors keep the standalone working row by default. Pass `{ embedWorkingStatus: true }` as the fourth `CustomEditor` constructor argument to use the built-in editor-border spinner instead.
-- Factory receives `tui`, `theme`, and `keybindings` from the app
-- Use `ctx.ui.getEditorComponent()` before `setEditorComponent()` to wrap the previously configured custom editor
-- Pass `undefined` to restore default: `ctx.ui.setEditorComponent(undefined)`
-
-To compose with another extension that already replaced the editor, capture the previous factory before setting yours:
-
-```typescript
-const previous = ctx.ui.getEditorComponent();
-ctx.ui.setEditorComponent((tui, theme, keybindings) =>
-  new MyEditor(tui, theme, keybindings, { base: previous?.(tui, theme, keybindings) })
-);
-```
-
-See [modal-editor.ts](../examples/extensions/modal-editor.ts) for a complete example with a mode indicator.
-
-### Message and Entry Rendering
-
-Register a custom renderer for messages with your `customType`. Use message renderers for content that should participate in LLM context:
-
-```typescript
-import { Text } from "@earendil-works/pi-tui";
-
-pi.registerMessageRenderer("my-extension", (message, options, theme) => {
-  const { expanded, outputPad } = options;
-  let text = theme.fg("accent", `[${message.customType}] `);
-  text += message.content;
-
-  if (expanded && message.details) {
-    text += "\n" + theme.fg("dim", JSON.stringify(message.details, null, 2));
-  } else if (message.details) {
-    text += ` (${options.keyHint("app.tools.expand", "to expand")})`;
-  }
-
-  return new Text(text, outputPad, 0);
-});
-```
-
-Messages are sent via `pi.sendMessage()`:
-
-```typescript
-pi.sendMessage({
-  customType: "my-extension",  // Matches registerMessageRenderer
-  content: "Status update",
-  display: true,               // Show in TUI
-  details: { ... },            // Available in renderer
-});
-```
-
-For TUI-only content that should not be sent to the LLM, render custom entries instead:
-
-```typescript
-pi.registerEntryRenderer("my-card", (entry, options, theme) => {
-  return new Text(theme.fg("accent", JSON.stringify(entry.data)));
-});
-
-pi.appendEntry("my-card", { status: "done" });
-```
-
-### Theme Colors
-
-All render functions receive a `theme` object. See [themes.md](themes.md) for creating custom themes and the full color palette.
-
-```typescript
-// Foreground colors
-theme.fg("toolTitle", text)   // Tool names
-theme.fg("accent", text)      // Highlights
-theme.fg("success", text)     // Success (green)
-theme.fg("error", text)       // Errors (red)
-theme.fg("warning", text)     // Warnings (yellow)
-theme.fg("muted", text)       // Secondary text
-theme.fg("dim", text)         // Tertiary text
-
-// Text styles
-theme.bold(text)
-theme.italic(text)
-theme.underline(text)
-theme.strikethrough(text)
-
-// Combined foreground, background, and attributes
-theme.style(text, { fg: "success", bg: "toolSuccessBg", bold: true })
-```
-
-`theme.colors` exposes concrete colors and `theme.appearance` is `"dark"` or `"light"`. See [Apply themes correctly](tui.md#apply-themes-correctly).
-
-For syntax highlighting in custom tool renderers:
-
-```typescript
-import { highlightCode, getLanguageFromPath } from "@earendil-works/pi-coding-agent";
-
-// Highlight code with an explicit language; returns one string per line
-const lines = highlightCode("const x = 1;", "typescript");
-
-// Auto-detect language from file path
-const lang = getLanguageFromPath("/path/to/file.rs");  // "rust", or undefined
-const highlighted = highlightCode(code, lang);
-```
-
-<a id="handle-errors-and-shutdown"></a>
+- `custom()`, `setFooter()`, `setHeader()`, `setEditorComponent()`, `setWidget()` with a component
+  factory, `addAutocompleteProvider()`, `onTerminalInput()`
+- `setTheme()`, `getAllThemes()`, `getTheme()` — `setTheme()` returns
+  `{ success: false, error: "UI not available" }`
+- `setWorkingMessage()`, `setWorkingVisible()`, `setWorkingIndicator()`, `setHiddenThinkingLabel()`,
+  `setToolsExpanded()`, `getToolsExpanded()`
+- `setTitle()`, `setEditorText()`, `getEditorText()`, `pasteToEditor()`
+- `registerMessageRenderer()`, `registerEntryRenderer()`, `registerMarkdownTransformer()`,
+  `registerToolRenderer()` — the registration is collected and never invoked
 
 ## Error Handling
 
@@ -3259,55 +2865,51 @@ const highlighted = highlightCode(code, lang);
 
 ## Mode Behavior
 
-| Mode | `ctx.mode` | `ctx.hasUI` | Notes |
-|------|------------|-------------|-------|
-| Interactive | `"tui"` | `true` | Full TUI with terminal rendering |
-| RPC (`--mode rpc`) | `"rpc"` | `true` | Dialogs and notifications via JSON protocol; `custom()` returns `undefined`, component factories are ignored. See [RPC Extension UI](rpc-extension-ui.md) |
-| JSON (`--mode json`) | `"json"` | `false` | Event stream to stdout; UI methods are no-ops |
-| Print (`-p`) | `"print"` | `false` | Extensions run but can't prompt |
+NekoPal always binds extensions with `mode: "rpc"` and `hasUI: true`. Dialogs and notifications work
+through the chat; terminal-only methods are accepted and ignored. See [Custom UI](#custom-ui).
 
-Use `ctx.mode === "tui"` before TUI-specific features (`custom()`, component factories, terminal input). Use `ctx.hasUI` before dialog and notification methods that work in both TUI and RPC modes.
+`ctx.mode === "tui"` is false, so a pi extension that guards terminal features with it takes the
+non-terminal branch. Code that must work in any host should test `ctx.hasUI` before a dialog method and
+avoid `ctx.ui.custom()` entirely.
 
 <a id="use-examples-as-the-implementation-reference"></a>
 
 ## Examples Reference
 
-All examples in [examples/extensions/](../examples/extensions/).
+All examples in [examples/extensions/](../examples/extensions/). Examples whose Key APIs column mentions
+`ui.custom`, `setFooter`, `setHeader`, `setEditorComponent`, or another terminal-only method still load,
+but their visible effect is gone in NekoPal.
 
 | Example | Description | Key APIs |
 |---------|-------------|----------|
 | **Tools** |||
 | `hello.ts` | Minimal tool registration | `registerTool` |
-| `question.ts` | Tool with user interaction | `registerTool`, `ui.custom`, `renderResult` |
-| `questionnaire.ts` | Multi-step wizard tool | `registerTool`, `ui.custom` |
-| `todo.ts` | Stateful tool with branch-aware state in `details` | `registerTool`, `renderResult`, `registerCommand`, `on("session_start")`, `on("session_tree")` |
+| `question.ts` | Tool with user interaction | `registerTool`, `ui.select`, `ui.input` |
+| `todo.ts` | Stateful tool with branch-aware state in `details` | `registerTool`, `registerCommand`, `on("session_start")`, `on("session_tree")` |
 | `dynamic-tools.ts` | Register tools after startup and during commands | `registerTool`, `session_start`, `registerCommand` |
 | `structured-output.ts` | Final structured-output tool with `terminate: true` | `registerTool`, terminating tool results |
 | `truncated-tool.ts` | Output truncation example | `registerTool`, `truncateHead` |
-| `tic-tac-toe.ts` | Tool that must run sequentially | `registerTool`, `executionMode: "sequential"`, `ui.custom` |
+| `tic-tac-toe.ts` | Tool that must run sequentially | `registerTool`, `executionMode: "sequential"` |
 | `tool-override.ts` | Override built-in read tool | `registerTool` (same name as built-in) |
-| `built-in-tool-renderer.ts` | Custom rendering for built-in tools | `create*ToolDefinition`, `renderCall`, `renderResult`, `renderShell` |
-| `minimal-mode.ts` | Collapsed display for built-in tools | Built-in tool overrides, `renderResult` |
 | **Commands** |||
 | `pirate.ts` | Modify system prompt per-turn | `registerCommand`, `before_agent_start` |
-| `summarize.ts` | Conversation summary command | `registerCommand`, `ui.custom` |
-| `handoff.ts` | Cross-provider model handoff | `registerCommand`, `ui.editor`, `ui.custom` |
-| `qna.ts` | Q&A with custom UI | `registerCommand`, `ui.custom`, `setEditorText` |
+| `summarize.ts` | Conversation summary command | `registerCommand` |
+| `handoff.ts` | Cross-provider model handoff | `registerCommand`, `ui.input` |
 | `send-user-message.ts` | Inject user messages | `registerCommand`, `sendUserMessage` |
 | `reload-runtime.ts` | Reload command and LLM tool handoff | `registerCommand`, `ctx.reload()`, `on("agent_settled")`, `sendUserMessage` |
 | `shutdown-command.ts` | Graceful shutdown command | `registerCommand`, `shutdown()` |
 | **Events & Gates** |||
 | `permission-gate.ts` | Block dangerous commands | `on("tool_call")`, `ui.select` |
-| `project-trust.ts` | Decide or defer project trust from a user/global or CLI extension | `on("project_trust")`, trust UI, required trust result |
+| `project-trust.ts` | Decide or defer project trust from a user/global extension | `on("project_trust")`, required trust result |
 | `protected-paths.ts` | Block writes to specific paths | `on("tool_call")` |
-| `confirm-destructive.ts` | Confirm session changes | `on("session_before_switch")`, `on("session_before_fork")` |
+| `confirm-destructive.ts` | Confirm session changes | `on("session_before_switch")`, `on("session_before_fork")`, `ui.confirm` |
 | `dirty-repo-guard.ts` | Warn on dirty git repo | `on("session_before_*")`, `exec` |
 | `input-transform.ts` | Transform user input | `on("input")` |
 | `input-transform-streaming.ts` | Streaming-aware input transform | `on("input")`, `streamingBehavior` |
 | `model-status.ts` | React to model changes | `on("model_select")`, `setStatus` |
 | `provider-payload.ts` | Inspect payloads and provider response headers | `on("before_provider_request")`, `on("after_provider_response")` |
-| `debug-provider.ts` | View raw provider stream events | `on("provider_stream_event")`, `appendEntry`, `registerEntryRenderer` |
-| `system-prompt-header.ts` | Display system prompt info | `on("agent_start")`, `getSystemPrompt` |
+| `debug-provider.ts` | View raw provider stream events | `on("provider_stream_event")`, `appendEntry` |
+| `system-prompt-header.ts` | Inspect the system prompt | `on("agent_start")`, `getSystemPrompt` |
 | `claude-rules.ts` | Load rules from files | `on("session_start")`, `on("before_agent_start")` |
 | `prompt-customizer.ts` | Add context-aware tool guidance using `systemPromptOptions` | `on("before_agent_start")`, `BuildSystemPromptOptions` |
 | `file-trigger.ts` | File watcher triggers messages | `sendMessage` |
@@ -3317,51 +2919,27 @@ All examples in [examples/extensions/](../examples/extensions/).
 | `git-checkpoint.ts` | Git stash on turns | `on("turn_start")`, `on("tool_result")`, `on("agent_settled")`, `on("session_before_fork")`, `exec` |
 | `git-merge-and-resolve.ts` | Fetch, merge, and resolve conflicts | `on("agent_end")`, `exec`, `sendUserMessage` |
 | `auto-commit-on-exit.ts` | Commit on shutdown | `on("session_shutdown")`, `exec` |
-| **UI Components** |||
-| `status-line.ts` | Footer status indicator | `setStatus`, session events |
-| `working-indicator.ts` | Customize the streaming working indicator | `setWorkingIndicator`, `registerCommand` |
-| `github-issue-autocomplete.ts` | Add `#1234` issue completions on top of built-in autocomplete by preloading recent open issues from `gh issue list` | `addAutocompleteProvider`, `on("session_start")`, `exec` |
-| `custom-footer.ts` | Replace footer entirely | `registerCommand`, `setFooter` |
-| `custom-header.ts` | Replace startup header | `on("session_start")`, `setHeader` |
-| `modal-editor.ts` | Vim-style modal editor | `setEditorComponent`, `CustomEditor` |
-| `rainbow-editor.ts` | Custom editor styling | `setEditorComponent` |
-| `widget-placement.ts` | Widget above/below editor | `setWidget` |
-| `overlay-test.ts` | Overlay components | `ui.custom` with overlay options |
-| `overlay-qa-tests.ts` | Comprehensive overlay tests | `ui.custom`, all overlay options |
-| `notify.ts` | Native terminal notification when the agent is done | `on("agent_settled")` |
-| `titlebar-spinner.ts` | Spinner in the terminal title while working | `setTitle` |
-| `hidden-thinking-label.ts` | Label for hidden thinking blocks | `setHiddenThinkingLabel` |
-| `border-status-editor.ts` | Status in the editor border | `setEditorComponent`, `CustomEditor` |
-| `rpc-demo.ts` | Every RPC-supported UI method | `ui.*` in RPC mode |
+| `session-name.ts` | Name sessions for the listing | `setSessionName`, `getSessionName` |
+| `bookmark.ts` | Bookmark entries for tree navigation | `setLabel` |
+| **Status and dialogs** |||
+| `status-line.ts` | Status line joined into the progress message | `setStatus`, session events |
 | `timed-confirm.ts` | Dialogs with timeout | `ui.confirm` with timeout/signal |
-| `mac-system-theme.ts` | Auto-switch theme | `setTheme`, `exec` |
+| `event-bus.ts` | Inter-extension events | `pi.events` |
 | **Complex Extensions** |||
 | `plan-mode/` | Full plan mode implementation | All event types, `registerCommand`, `registerShortcut`, `registerFlag`, `setStatus`, `setWidget`, `sendMessage`, `setActiveTools` |
 | `preset.ts` | Saveable presets (model, tools, thinking) | `registerCommand`, `registerShortcut`, `registerFlag`, `setModel`, `setActiveTools`, `setThinkingLevel`, `appendEntry` |
-| `tools.ts` | Toggle tools on/off UI | `registerCommand`, `setActiveTools`, `SettingsList`, session events |
 | **Remote & Sandbox** |||
 | `ssh.ts` | SSH remote execution | `registerFlag`, `on("user_bash")`, `on("before_agent_start")`, tool operations |
 | `interactive-shell.ts` | Persistent shell session | `on("user_bash")` |
-| `gondolin/` | Route built-in tools and `!` commands into a Gondolin micro-VM | Tool operations, built-in tool overrides, `on("user_bash")` |
+| `gondolin/` | Route built-in tools and shell commands into a Gondolin micro-VM | Tool operations, built-in tool overrides, `on("user_bash")` |
 | `subagent/` | Spawn sub-agents | `registerTool`, `exec` |
-| **Games** |||
-| `snake.ts` | Snake game | `registerCommand`, `ui.custom`, keyboard handling |
-| `space-invaders.ts` | Space Invaders game | `registerCommand`, `ui.custom` |
-| `doom-overlay/` | Doom in overlay | `ui.custom` with overlay |
 | **Providers** |||
 | `custom-provider-anthropic/` | Custom Anthropic proxy | `registerProvider` |
 | `custom-provider-gitlab-duo/` | GitLab Duo integration | `registerProvider` with OAuth |
 | `jev-router.ts` | Virtual model that routes planning and implementation to different models | `registerVirtualModel` |
-| **Messages & Communication** |||
-| `message-renderer.ts` | Custom message rendering | `registerMessageRenderer`, `sendMessage` |
-| `entry-renderer.ts` | TUI-only custom entry rendering | `registerEntryRenderer`, `appendEntry` |
-| `event-bus.ts` | Inter-extension events | `pi.events` |
-| **Session Metadata** |||
-| `session-name.ts` | Name sessions for selector | `setSessionName`, `getSessionName` |
-| `bookmark.ts` | Bookmark entries for /tree | `setLabel` |
 | **Misc** |||
 | `commands.ts` | List available slash commands | `getCommands` |
-| `dynamic-resources/` | Add skills, prompts, and themes at runtime | `on("resources_discover")` |
+| `dynamic-resources/` | Add skills and prompts at runtime | `on("resources_discover")` |
 | `inline-bash.ts` | Expand inline `!{command}` in user prompts | `on("input")`, `exec` |
 | `bash-spawn-hook.ts` | Adjust bash command, cwd, and env before execution | `createBashTool`, `spawnHook` |
 | `with-deps/` | Extension with npm dependencies | Package structure with `package.json` |

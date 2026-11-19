@@ -1,6 +1,12 @@
 # Codemode
 
-The `codemode` tool lets the model write a JavaScript script that calls pi's other tools and runs non-LLM models, such as classifiers and image models. Only the script's output reaches the model, so a script can run calls in parallel and filter large results before the model sees them. To turn it on, see [Enable codemode](cli.md#enable-codemode).
+The `codemode` tool lets the model write a JavaScript script that calls the session's other tools and
+runs non-LLM models, such as classifiers. Only the script's output reaches the model, so a script can
+run calls in parallel and filter large results before the model sees them.
+
+`codemode` is a built-in extension registered inactive. Enable it with `defaultTools = ["+codemode"]`
+in [settings](settings.md#tools), or let the MCP extension activate it by connecting a server with
+`codemode` exposure (see [MCP servers](mcp.md#control-tool-exposure)).
 
 ## Scripts
 
@@ -13,7 +19,7 @@ A script may start with an options line. It must be the first line; an options l
 ```
 
 - `max_output_tokens` (default 10000) limits the output. Longer output keeps its start and end, and the full text is written to a temp file whose path is included in the result. A script fails when its output passes 16777216 characters of text and base64 image data or 100000 `text()`, `image()`, and `console` calls; write large data to a file with a tool instead.
-- `timeout_ms` is a hard deadline for the whole script, including any wait for a free worker. It is unset by default. Image generation can take minutes, so do not set a short deadline for scripts that generate images.
+- `timeout_ms` is a hard deadline for the whole script, including any wait for a free worker. It is unset by default.
 
 The result starts with `Script completed` or `Script failed`, the wall time, and the output. Text and image items appear in order, each on its own line. When the output has more than one text item (from `text()` or `return`), each starts with a `==> text N/M <==` line. `console` calls follow in one `<console_output>` block with one line per call. A failed script keeps its partial output, followed by `Script error:` and the error. Tool calls are real: calls made before a failure are not undone. Calls still running when the script ends are cancelled, and unawaited promises are discarded.
 
@@ -23,7 +29,7 @@ The result starts with `Script completed` or `Script failed`, the wall time, and
 |---|---|
 | `tools.<name>(args)` | Call a tool. See [Call tools](#call-tools). |
 | `text(value)` | Add a text item to the output. Strings are added as is, other values as JSON. |
-| `image(value)` | Add an image to the output: a base64 `data:` URL, an `{ image_url }` object, or an image block `{ type: "image", data, mimeType }` such as those returned by MCP tools and `models.generateImages()`. Remote URLs are not supported. PNG, JPEG, GIF, and WebP are accepted. Each image is also saved to a temp file, and the result names the path before the image. |
+| `image(value)` | Add an image to the output: a base64 `data:` URL, an `{ image_url }` object, or an image block `{ type: "image", data, mimeType }` such as those returned by MCP tools. Remote URLs are not supported. PNG, JPEG, GIF, and WebP are accepted. Each image is also saved to a temp file, and the result names the path before the image. |
 | `console.log(...)` | Add a line to the `<console_output>` block after the other output. Arguments are joined with spaces; `info`, `warn`, `error`, and `debug` do the same. |
 | `return value` | A top-level `return` adds the value like `text()`. |
 | `exit()` | End the script successfully. |
@@ -36,7 +42,7 @@ The result starts with `Script completed` or `Script failed`, the wall time, and
 
 ## Call tools
 
-Every tool the session can call is a method of `tools`, named by its identifier: characters that are not valid in a JavaScript identifier become `_`, so the MCP tool `mcp__dev-radius__search` is `tools.mcp__dev_radius__search`. Each method takes one object with the tool's arguments.
+Every tool the session can call is a method of `tools`, named by its identifier: characters that are not valid in a JavaScript identifier become `_`, so the MCP tool `mcp__dev_files__search` is `tools.mcp__dev_files__search`. Each method takes one object with the tool's arguments.
 
 What a call resolves to depends on the tool:
 
@@ -59,7 +65,10 @@ The store is for small state such as IDs, cursors, or summaries. One value may h
 
 ## Models
 
-`models` reaches the model catalog and runs non-LLM models with the session's credentials: classifiers, which answer typed questions about JSON state and, for some models, images, and image models, which generate images. Chat models are listed but cannot be run from scripts. Which classifier and image models exist is described in [Use classifier models](models.md#use-classifier-models) and [Use image models](models.md#use-image-models).
+`models` reaches the model catalog and runs non-LLM models with the session's credentials: classifiers,
+which answer typed questions about JSON state and, for some models, images. Chat models are listed but
+cannot be run from scripts. Which classifier models exist is described in
+[Use classifier models](models.md#use-classifier-models).
 
 ```ts
 type ModelType = "chat" | "image" | "classifier";
@@ -85,14 +94,16 @@ declare const models: {
   getModelOfType(type: ModelType, provider: string, id: string): Promise<ModelInfo | undefined>;
   /** Answer `context.questions` about `context.state`; answers are in `result.answers` by question ID. */
   classify(model: ModelInfo, context: ClassifierContext): Promise<ClassifierResult>;
-  /** Generate images from `context.input` text and image blocks; show `result.output` blocks with image(). Can take minutes. */
-  generateImages(model: ModelInfo, context: ImagesContext): Promise<ImagesResult>;
 };
 ```
 
-`classify()` and `generateImages()` use only the `provider` and `id` of `model`, so `{ provider, id }` works as well. They do not throw on provider errors: check `stopReason` and `errorMessage`. At most four such calls run at once per script; more calls wait for a free slot, so `Promise.all()` over many items is fine. Their usage is added to the `codemode` tool result and counts toward the session cost.
+`classify()` uses only the `provider` and `id` of `model`, so `{ provider, id }` works as well. It does
+not throw on provider errors: check `stopReason` and `errorMessage`. At most four such calls run at once
+per script; more calls wait for a free slot, so `Promise.all()` over many items is fine. Their usage is
+added to the `codemode` tool result and counts toward the session cost.
 
-Model IDs differ between providers, for example `typesafe/jev-latest` and `openrouter/typesafe/jev-1.13`. Use `models.getAvailableOfType(type)` to find the IDs that work with the current credentials.
+Model IDs differ between providers. Use `models.getAvailableOfType(type)` to find the IDs that work
+with the current credentials.
 
 ### Classify
 
@@ -138,10 +149,10 @@ type ModelUsage = { input: number; output: number; totalTokens: number; cost: { 
 Classify several items by calling `classify()` once per item. This script sorts feedback messages, for example ones a tool returned earlier in the script:
 
 ```js
-const jev = await models.getModelOfType("classifier", "typesafe", "jev-latest");
+const luna = await models.getModelOfType("classifier", "openai", "gpt-6-luna");
 const results = await Promise.all(
   messages.map((message) =>
-    models.classify(jev, {
+    models.classify(luna, {
       state: { message },
       questions: {
         sentiment: {
@@ -165,7 +176,9 @@ return results.map((result, i) =>
 );
 ```
 
-Classifiers whose `input` includes `"image"` also judge images. `tools.read()` returns an image file as an image block that `images` accepts. Other classifiers return an error result when `images` is not empty.
+Classifiers whose `input` includes `"image"` also judge images. `tools.read()` returns an image file as
+an image block that `images` accepts. Other classifiers return an error result when `images` is not
+empty.
 
 ```js
 const luna = await models.getModelOfType("classifier", "openai", "gpt-6-luna");
@@ -183,48 +196,10 @@ const result = await models.classify(luna, {
 });
 ```
 
-### Generate images
-
-```ts
-interface ImagesContext {
-  /** The prompt as text blocks, plus image blocks to edit or use as references. */
-  input: (TextBlock | ImageBlock)[];
-}
-
-interface ImagesResult {
-  provider: string;
-  model: string;
-  /** Generated images, and text blocks for models that also return text. */
-  output: (TextBlock | ImageBlock)[];
-  usage?: ModelUsage;
-  stopReason: "stop" | "error" | "aborted";
-  errorMessage?: string;
-}
-
-type TextBlock = { type: "text"; text: string };
-/** `data` is base64. */
-type ImageBlock = { type: "image"; data: string; mimeType: string };
-```
-
-Show generated images with `image(block)`. Do not print `data` with `text()`, `console`, or `return`: it is large and the model cannot read it as text. `image()` also saves each image to a temp file and puts its path in the result, so a later turn can copy or move the file.
-
-```js
-// @options: {"timeout_ms": 300000}
-const painter = await models.getModelOfType("image", "openrouter", "google/gemini-2.5-flash-image");
-const result = await models.generateImages(painter, {
-  input: [{ type: "text", text: "A red fox in the snow, watercolor" }],
-});
-if (result.stopReason !== "stop") return result.errorMessage;
-for (const block of result.output) {
-  if (block.type === "image") image(block);
-  else text(block.text);
-}
-```
-
 ## Limits
 
 - A script's VM has 256 MB of memory. Running out throws `InternalError: out of memory`; filter or aggregate large data instead of accumulating it.
 - On Bun, stopping a script or reaching its deadline ends the call promptly, but a built-in that does not poll QuickJS's interrupt handler can keep computing in its worker until it returns.
-- At most two codemode workers may be alive across all sessions in one pi process; `PI_CODEMODE_MAX_WORKERS` changes the limit. A cancelled worker occupies its slot until it exits. At capacity, new scripts wait for a free worker in arrival order. A script that gets no worker within 60 seconds, or before its `timeout_ms`, fails without running.
+- At most two codemode workers may be alive across all sessions in one process; `NEKOPAL_CODEMODE_MAX_WORKERS` changes the limit. A cancelled worker occupies its slot until it exits. At capacity, new scripts wait for a free worker in arrival order. A script that gets no worker within 60 seconds, or before its `timeout_ms`, fails without running.
 - A script that waits on a promise that can never settle (no tool call pending) fails immediately, since there are no timers.
 - Scripts cannot start other `codemode` scripts.

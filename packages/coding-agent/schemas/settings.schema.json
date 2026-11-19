@@ -1,24 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://pi.dev/schemas/settings.schema.json",
+  "$id": "https://nekopal.local/schemas/settings.schema.json",
   "$comment": "This file is generated from TypeScript source. Do not edit it manually; run npm run generate:schemas.",
   "type": "object",
   "properties": {
     "$schema": {
       "type": "string",
       "description": "JSON Schema reference."
-    },
-    "lastChangelogVersion": {
-      "type": "string"
-    },
-    "extensionChangelogVersions": {
-      "type": "object",
-      "patternProperties": {
-        "^.*$": {
-          "type": "string"
-        }
-      },
-      "description": "Last seen changelog version per extension package."
     },
     "defaultProvider": {
       "type": "string"
@@ -59,24 +47,6 @@
       ],
       "default": "auto"
     },
-    "sessionShareDestination": {
-      "anyOf": [
-        {
-          "type": "string",
-          "const": "auto"
-        },
-        {
-          "type": "string",
-          "const": "gist"
-        },
-        {
-          "type": "string",
-          "const": "radius"
-        }
-      ],
-      "description": "Destination used by /share. \"auto\" uses Radius when authenticated and otherwise creates a GitHub gist.",
-      "default": "auto"
-    },
     "steeringMode": {
       "anyOf": [
         {
@@ -102,9 +72,6 @@
         }
       ],
       "default": "one-at-a-time"
-    },
-    "theme": {
-      "type": "string"
     },
     "compaction": {
       "type": "object",
@@ -208,35 +175,14 @@
         }
       }
     },
-    "hideThinkingBlock": {
-      "type": "boolean",
-      "default": false
-    },
     "showCacheMissNotices": {
       "type": "boolean",
       "description": "Show cache cost and provider recovery notices.",
       "default": false
     },
-    "externalEditor": {
-      "type": "string",
-      "description": "Command for Ctrl+G external editor; takes precedence over VISUAL and EDITOR."
-    },
     "shellPath": {
       "type": "string",
       "description": "Custom shell path, for example for Cygwin on Windows, with support for leading ~ expansion."
-    },
-    "quietStartup": {
-      "anyOf": [
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "string",
-          "const": "header"
-        }
-      ],
-      "description": "When true, hide all startup output. When \"header\", keep only the startup header.",
-      "default": false
     },
     "defaultProjectTrust": {
       "anyOf": [
@@ -275,25 +221,6 @@
       "minItems": 1,
       "description": "Command `pi update` runs to update Pi itself, in argv form such as [\"mise\", \"use\", \"-g\", \"npm:{packageName}@{version}\"]. Placeholders: {packageName}, {version}, {installSpec}. PI_SELF_UPDATE_COMMAND takes precedence. Global setting only."
     },
-    "collapseChangelog": {
-      "type": "boolean",
-      "description": "Show the condensed changelog after update; use /changelog for the full changelog.",
-      "default": false
-    },
-    "enableInstallTelemetry": {
-      "type": "boolean",
-      "description": "Send an anonymous version and update ping after changelog-detected updates.",
-      "default": true
-    },
-    "enableAnalytics": {
-      "type": "boolean",
-      "description": "Opt in to analytics data sharing.",
-      "default": false
-    },
-    "trackingId": {
-      "type": "string",
-      "description": "Analytics tracking identifier, generated when analytics is enabled."
-    },
     "packages": {
       "type": "array",
       "items": {
@@ -328,12 +255,6 @@
                 }
               },
               "prompts": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "themes": {
                 "type": "array",
                 "items": {
                   "type": "string"
@@ -390,84 +311,10 @@
       },
       "description": "Local prompt template file paths or directories."
     },
-    "themes": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
-      "description": "Local theme file paths or directories."
-    },
     "enableSkillCommands": {
       "type": "boolean",
       "description": "Register skills as /skill:name commands.",
       "default": true
-    },
-    "terminal": {
-      "type": "object",
-      "properties": {
-        "showImages": {
-          "type": "boolean",
-          "description": "Show images when the terminal supports them.",
-          "default": true
-        },
-        "imageWidthCells": {
-          "type": "number",
-          "description": "Preferred inline image width in terminal cells.",
-          "default": 60
-        },
-        "clearOnShrink": {
-          "type": "boolean",
-          "description": "Clear empty rows when content shrinks.",
-          "default": false
-        },
-        "showTerminalProgress": {
-          "type": "boolean",
-          "description": "Show OSC 9;4 terminal progress indicators.",
-          "default": false
-        },
-        "hyperlinks": {
-          "anyOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "string",
-              "const": "auto"
-            }
-          ]
-        },
-        "images": {
-          "anyOf": [
-            {
-              "type": "string",
-              "const": "kitty"
-            },
-            {
-              "type": "string",
-              "const": "iterm2"
-            },
-            {
-              "type": "string",
-              "const": "auto"
-            },
-            {
-              "type": "boolean",
-              "const": false
-            }
-          ]
-        },
-        "trueColor": {
-          "anyOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "string",
-              "const": "auto"
-            }
-          ]
-        }
-      }
     },
     "images": {
       "type": "object",
@@ -498,50 +345,6 @@
       },
       "description": "Initial tool selection. Plain names replace the inherited selection; +name and -name entries add or remove tools."
     },
-    "doubleEscapeAction": {
-      "anyOf": [
-        {
-          "type": "string",
-          "const": "fork"
-        },
-        {
-          "type": "string",
-          "const": "tree"
-        },
-        {
-          "type": "string",
-          "const": "none"
-        }
-      ],
-      "description": "Action for double-escape with an empty editor.",
-      "default": "tree"
-    },
-    "treeFilterMode": {
-      "anyOf": [
-        {
-          "type": "string",
-          "const": "default"
-        },
-        {
-          "type": "string",
-          "const": "no-tools"
-        },
-        {
-          "type": "string",
-          "const": "user-only"
-        },
-        {
-          "type": "string",
-          "const": "labeled-only"
-        },
-        {
-          "type": "string",
-          "const": "all"
-        }
-      ],
-      "description": "Default filter when opening /tree.",
-      "default": "default"
-    },
     "thinkingBudgets": {
       "type": "object",
       "properties": {
@@ -559,60 +362,6 @@
         }
       },
       "description": "Custom token budgets for thinking levels."
-    },
-    "editorPaddingX": {
-      "type": "number",
-      "description": "Horizontal padding for the input editor.",
-      "default": 0
-    },
-    "outputPad": {
-      "anyOf": [
-        {
-          "type": "number",
-          "const": 0
-        },
-        {
-          "type": "number",
-          "const": 1
-        }
-      ],
-      "description": "Horizontal padding for transcript content.",
-      "default": 1
-    },
-    "autocompleteMaxVisible": {
-      "type": "number",
-      "description": "Maximum visible items in the autocomplete dropdown.",
-      "default": 5
-    },
-    "showHardwareCursor": {
-      "type": "boolean",
-      "description": "Show the terminal cursor while still positioning it for IME."
-    },
-    "markdown": {
-      "type": "object",
-      "properties": {
-        "codeBlockIndent": {
-          "type": "string",
-          "default": "  "
-        },
-        "mermaid": {
-          "anyOf": [
-            {
-              "type": "string",
-              "const": "off"
-            },
-            {
-              "type": "string",
-              "const": "final"
-            },
-            {
-              "type": "string",
-              "const": "streaming"
-            }
-          ],
-          "default": "streaming"
-        }
-      }
     },
     "warnings": {
       "type": "object",
@@ -700,69 +449,6 @@
       ],
       "description": "WebSocket connect or open handshake timeout in milliseconds; 0 or \"disabled\" disables it."
     },
-    "tuiMode": {
-      "anyOf": [
-        {
-          "type": "string",
-          "const": "regular"
-        },
-        {
-          "type": "string",
-          "const": "fullscreen"
-        }
-      ],
-      "default": "fullscreen"
-    },
-    "fullscreenExitOutput": {
-      "anyOf": [
-        {
-          "type": "string",
-          "const": "transcript"
-        },
-        {
-          "type": "string",
-          "const": "resume-hint"
-        }
-      ],
-      "description": "No effect in regular TUI mode.",
-      "default": "transcript"
-    },
-    "fullscreenScrollbar": {
-      "anyOf": [
-        {
-          "type": "string",
-          "const": "auto"
-        },
-        {
-          "type": "string",
-          "const": "always"
-        },
-        {
-          "type": "string",
-          "const": "hidden"
-        }
-      ],
-      "description": "No effect in regular TUI mode.",
-      "default": "auto"
-    },
-    "fullscreenCopyOnSelect": {
-      "type": "boolean",
-      "description": "No effect in regular TUI mode.",
-      "default": true
-    },
-    "fullscreenWheelScrollLines": {
-      "anyOf": [
-        {
-          "type": "number"
-        },
-        {
-          "type": "string",
-          "const": "auto"
-        }
-      ],
-      "description": "Lines scrolled per wheel event in fullscreen mode; numeric values are clamped from 1 to 100.",
-      "default": "auto"
-    },
     "queueMode": {
       "anyOf": [
         {
@@ -781,6 +467,121 @@
       "type": "boolean",
       "description": "Legacy setting migrated to transport.",
       "deprecated": true
+    },
+    "nekopal": {
+      "type": "object",
+      "properties": {
+        "defaultLang": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "en"
+            },
+            {
+              "type": "string",
+              "const": "zh"
+            }
+          ],
+          "description": "Language for replies before a chat picks one with /lang.",
+          "default": "en"
+        },
+        "workspace": {
+          "type": "string",
+          "description": "Working directory of the agent, such as \"~/.nekopal/workspace\". \"~\" expands to the home directory.",
+          "default": "~/.nekopal/workspace"
+        },
+        "channels": {
+          "type": "object",
+          "properties": {
+            "telegram": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "botToken": {
+                  "type": "string",
+                  "description": "Bot token, or \"$ENV_NAME\" / \"!command\" resolved at startup.",
+                  "default": "$TELEGRAM_BOT_TOKEN"
+                },
+                "allowedUsers": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer"
+                  },
+                  "description": "Telegram user ids allowed to talk to the bot. Empty ignores every message."
+                }
+              }
+            },
+            "qq": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "appId": {
+                  "type": "string",
+                  "default": ""
+                },
+                "appSecret": {
+                  "type": "string",
+                  "description": "Bot secret, or \"$ENV_NAME\" / \"!command\" resolved at startup.",
+                  "default": "$QQ_BOT_SECRET"
+                },
+                "allowedOpenIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "QQ openids allowed to talk to the bot. Empty ignores every message."
+                },
+                "stream": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "proactivePerMinute": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 20,
+                  "default": 18
+                },
+                "proactivePerDay": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000,
+                  "default": 1000
+                }
+              }
+            }
+          }
+        },
+        "memory": {
+          "type": "object",
+          "properties": {
+            "memoryChars": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 10000,
+              "default": 2200
+            },
+            "userChars": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 10000,
+              "default": 1375
+            },
+            "reviewEveryTurns": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000,
+              "default": 10,
+              "description": "Review the conversation for memories every N user turns; 0 disables the review."
+            }
+          }
+        }
+      }
     }
   },
   "additionalProperties": true,

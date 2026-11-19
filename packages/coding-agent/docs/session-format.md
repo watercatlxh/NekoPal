@@ -8,16 +8,19 @@ For programmatic creation, persistence, and tree navigation, see the [`SessionMa
 ## File Location
 
 ```
-~/.pi/agent/sessions/--<path>--/<timestamp>_<session-id>.jsonl
+~/.nekopal/sessions/<channel>-<chatId>/<timestamp>_<session-id>.jsonl
 ```
 
-By default, `<session-id>` is a UUID. Callers can supply a custom ID through the SDK or `--session-id`. For `<path>`, Pi removes the leading path separator and replaces `/`, `\\`, and `:` with `-`.
+The daemon gives every chat its own directory. A session started without an explicit directory uses
+`~/.nekopal/sessions/--<path>--/` instead, where `<path>` is the working directory with the leading
+separator removed and `/`, `\\`, and `:` replaced by `-`.
+
+By default, `<session-id>` is a UUID. Callers can supply a custom ID through the SDK.
 
 ## Deleting Sessions
 
-Sessions can be removed by deleting their `.jsonl` files under `~/.pi/agent/sessions/`.
-
-Pi also supports deleting sessions interactively from `/resume` (select a session and press `Ctrl+D`, then confirm). When available, pi uses the `trash` CLI to avoid permanent deletion.
+Delete a session's `.jsonl` file, or the whole chat directory, to discard its history. `/new` does not
+delete anything; it starts a new session next to the old ones.
 
 ## Session Version
 
@@ -69,7 +72,7 @@ First line of the file. Metadata only, not part of the tree (no `id`/`parentId`)
 {"type":"session","version":3,"id":"uuid","timestamp":"2024-12-03T14:00:00.000Z","cwd":"/path/to/project"}
 ```
 
-For sessions with a parent (created via `/fork`, `/clone`, or `newSession({ parentSession })`):
+For sessions with a parent (created via a fork, a clone, or `newSession({ parentSession })`):
 
 ```json
 {"type":"session","version":3,"id":"uuid","timestamp":"2024-12-03T14:00:00.000Z","cwd":"/path/to/project","parentSession":"/path/to/original/session.jsonl"}
@@ -92,7 +95,7 @@ Sessions created before system messages existed have no leading system message; 
 {"type":"message","id":"c3d4e5f6","parentId":"b2c3d4e5","timestamp":"2024-12-03T14:00:03.000Z","message":{"role":"toolResult","toolCallId":"call_123","toolName":"bash","content":[{"type":"text","text":"output"}],"isError":false,"timestamp":1733234403000}}
 ```
 
-Assistant messages name the model that produced them. Newer messages also record `thinkingLevel`, the Pi thinking level requested for that response.
+Assistant messages name the model that produced them. Newer messages also record `thinkingLevel`, the NekoPal thinking level requested for that response.
 
 ### ModelChangeEntry
 
@@ -118,7 +121,7 @@ Records model-attributed usage that is not an assistant message and does not par
 {"type":"usage","id":"f6g7h8i9","parentId":"e5f6g7h8","timestamp":"2024-12-03T14:08:00.000Z","kind":"cache_warm","provider":"anthropic","model":"claude-sonnet-4-5","usage":{"input":0,"output":0,"cacheRead":50000,"cacheWrite":0,"totalTokens":50000,"cost":{"input":0,"output":0,"cacheRead":0.015,"cacheWrite":0,"total":0.015}}}
 ```
 
-Usage entries contribute to session token and cost totals. Pi hides them from the conversation tree. Consumers should treat unknown `kind` values as normal usage rather than rejecting them.
+Usage entries contribute to session token and cost totals. NekoPal hides them from the conversation tree. Consumers should treat unknown `kind` values as normal usage rather than rejecting them.
 
 ### CompactionEntry
 
@@ -128,7 +131,7 @@ Created when context is compacted. Stores a summary of earlier messages and a co
 {"type":"compaction","id":"f6g7h8i9","parentId":"e5f6g7h8","timestamp":"2024-12-03T14:10:00.000Z","summary":"User discussed X, Y, Z...","firstKeptEntryId":"c3d4e5f6","tokensBefore":50000,"systemMessage":{"role":"system","content":"You are a coding assistant.","toolsAdded":[],"timestamp":1733235000000}}
 ```
 
-`firstKeptEntryId` is required. It identifies the first entry retained from before the compaction entry. When rebuilding context, Pi replaces older summarized entries with the compaction summary and keeps the range beginning at this entry. A retain-none compaction stores its own ID in this field, so no preceding entries are retained.
+`firstKeptEntryId` is required. It identifies the first entry retained from before the compaction entry. When rebuilding context, NekoPal replaces older summarized entries with the compaction summary and keeps the range beginning at this entry. A retain-none compaction stores its own ID in this field, so no preceding entries are retained.
 
 Optional fields:
 - `systemMessage`: The replayed prompt sections and tool declarations at the compaction boundary; it becomes the leading system message of the compacted context, and system messages among the kept entries are dropped in its favor. It is absent on older session entries.
@@ -148,7 +151,8 @@ Targets may be user, assistant, tool-result, or custom-message entries. `replace
 
 ### BranchSummaryEntry
 
-Created when switching branches via `/tree` with an LLM generated summary of the left branch up to the common ancestor. Captures context from the abandoned path.
+Created when switching branches with an LLM-generated summary of the left branch up to the common
+ancestor. Captures context from the abandoned path.
 
 ```json
 {"type":"branch_summary","id":"g7h8i9j0","parentId":"a1b2c3d4","timestamp":"2024-12-03T14:15:00.000Z","fromId":"f6g7h8i9","summary":"Branch explored approach A..."}
@@ -169,9 +173,10 @@ Extension state persistence. Does NOT participate in LLM context.
 {"type":"custom","id":"h8i9j0k1","parentId":"g7h8i9j0","timestamp":"2024-12-03T14:20:00.000Z","customType":"my-extension","data":{"count":42}}
 ```
 
-Use `customType` to identify your extension's entries on reload. Interactive mode can render custom entries via `pi.registerEntryRenderer(customType, renderer)`, but they still do not participate in LLM context.
+Use `customType` to identify your extension's entries on reload. A front end can render custom entries via `pi.registerEntryRenderer(customType, renderer)`, but they still
+do not participate in LLM context.
 
-Pi stores [virtual model](virtual-models.md) router state as custom entries with `customType` `pi.virtual-model-state` and `data` `{ provider, modelId, state }`.
+NekoPal stores [virtual model](virtual-models.md) router state as custom entries with `customType` `pi.virtual-model-state` and `data` `{ provider, modelId, state }`.
 
 ### CustomMessageEntry
 
@@ -183,7 +188,7 @@ Extension-injected messages that DO participate in LLM context.
 
 Fields:
 - `content`: String or `(TextContent | ImageContent)[]` (same as UserMessage)
-- `display`: `true` = show in TUI with distinct styling, `false` = hidden
+- `display`: `true` = show with distinct styling in a front end, `false` = hidden
 - `details`: Optional extension-specific metadata (not sent to LLM)
 
 ### LabelEntry
@@ -198,13 +203,13 @@ Set `label` to `undefined` to clear a label.
 
 ### SessionInfoEntry
 
-Session metadata (e.g., user-defined display name). Set via `/name`, `--name` / `-n`, or `pi.setSessionName()` in extensions.
+Session metadata (e.g., a display name). Set via `pi.setSessionName()` in extensions.
 
 ```json
 {"type":"session_info","id":"k1l2m3n4","parentId":"j0k1l2m3","timestamp":"2024-12-03T14:35:00.000Z","name":"Refactor auth module"}
 ```
 
-The session name is displayed in the session selector (`/resume`) instead of the first message when set.
+The session name, when set, is what the session listing shows instead of the first message.
 
 ## Tree Structure
 
@@ -230,7 +235,7 @@ Entries normally form one tree, but navigation APIs can create multiple roots:
    - Includes the compaction entry first
    - Includes non-system entries from `firstKeptEntryId` up to, but not including, the compaction entry
    - Includes entries after the compaction entry
-3. Preserves non-message entries in the selected range so interactive mode can render them
+3. Preserves non-message entries in the selected range so a front end can render them
 
 `buildSessionProjection()` then applies the latest `context_edit` for each selected target. It returns the model-visible messages together with their source entries. Omitted targets produce no message; replacements retain the source entry's role and metadata while changing only content. The raw selected entries are not modified.
 
