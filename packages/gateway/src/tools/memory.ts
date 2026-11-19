@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentToolResult, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { defineTool } from "@earendil-works/pi-coding-agent";
+import { defineTool, loadSkillsFromDir } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { MemoryOperation, MemoryStore, PendingStore } from "../memory/store.ts";
 import { firstThreat } from "../memory/threats.ts";
@@ -45,15 +45,15 @@ function skillPath(name: string, skillsDir: string): string {
 
 function writeSkill(name: string, content: string, skillsDir: string): void {
 	const path = skillPath(name, skillsDir);
-	const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content);
-	if (!frontmatter) throw new Error("SKILL.md needs a frontmatter block with name and description");
-	for (const field of ["name", "description"]) {
-		if (!new RegExp(`^${field}\\s*:`, "m").test(frontmatter[1])) {
-			throw new Error(`SKILL.md frontmatter is missing ${field}`);
-		}
-	}
 	mkdirSync(join(skillsDir, name), { recursive: true });
 	writeFileSync(path, content, "utf-8");
+	// Validate with the loader that will read it back, so a broken skill fails here, not at startup.
+	const loaded = loadSkillsFromDir({ dir: join(skillsDir, name), source: "path" });
+	const problem = loaded.diagnostics.find((diagnostic) => diagnostic.type === "error");
+	if (problem || loaded.skills.length === 0) {
+		rmSync(join(skillsDir, name), { recursive: true, force: true });
+		throw new Error(`SKILL.md is invalid: ${problem?.message ?? "no skill was found"}`);
+	}
 }
 
 function patchSkill(name: string, oldText: string, content: string, skillsDir: string): void {
