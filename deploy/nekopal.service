@@ -1,12 +1,12 @@
 [Unit]
 Description=NekoPal personal assistant daemon
-Documentation=https://github.com/watercatlxh/nekopal
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/env node %h/nekopal/packages/gateway/dist/main.js
+# Adjust the path to the checkout: the daemon runs the built gateway entrypoint.
+ExecStart=/usr/bin/env node %h/NekoPal/packages/gateway/dist/main.js
 EnvironmentFile=%h/.nekopal/env
 Restart=on-failure
 RestartSec=5
