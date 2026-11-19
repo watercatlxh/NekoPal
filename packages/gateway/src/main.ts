@@ -46,7 +46,7 @@ async function createAdapters(
 	}
 	if (channels?.qq?.enabled) {
 		const { createQqAdapter } = await import("./channel/qq/adapter.ts");
-		adapters.push(createQqAdapter({ settingsManager, log, logError }));
+		adapters.push(createQqAdapter({ settingsManager, log, logError, state }));
 	}
 	return adapters;
 }

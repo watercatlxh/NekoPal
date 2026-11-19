@@ -171,7 +171,9 @@ export class ChatContext implements ChatController {
 					sessionStartEvent,
 					customTools: this.customTools(),
 				});
-				this.extensionErrors = services.resourceLoader.getExtensions().errors.length;
+				const failed = services.resourceLoader.getExtensions().errors;
+				this.extensionErrors = failed.length;
+				for (const error of failed) logError(`extension failed to load: ${error.path}`, error.error);
 				void this.reportExtensionErrors();
 				return { ...created, services, diagnostics: services.diagnostics };
 			},
