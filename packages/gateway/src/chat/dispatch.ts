@@ -29,9 +29,10 @@ export interface DispatcherOptions {
 	startedAt: number;
 	version: string;
 	enabledChannels: string[];
-	qqQuota?: () => string;
 	/** Allowlist per channel: Telegram user ids, QQ openids. */
 	allowed(channel: ChannelName, userId: string): boolean;
+	/** The QQ proactive-quota line for a user, when QQ is running. */
+	qqQuota?(chatId: string, lang: Lang): string | undefined;
 }
 
 /**
@@ -148,7 +149,7 @@ export class Dispatcher {
 			startedAt: this.options.startedAt,
 			version: this.options.version,
 			enabledChannels: this.options.enabledChannels,
-			qqQuota: this.options.qqQuota,
+			qqQuota: this.options.qqQuota ? () => this.options.qqQuota?.(message.chatId, chat.lang) ?? "" : undefined,
 		};
 	}
 }

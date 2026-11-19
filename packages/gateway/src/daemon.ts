@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import type { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { setProtectedPaths } from "@earendil-works/pi-coding-agent";
+import type { QqQuotaReporter } from "./channel/qq/adapter.ts";
 import type { Adapter, ChannelName, Lang } from "./channel/types.ts";
 import { Dispatcher } from "./chat/dispatch.ts";
 import { ChatRegistry } from "./chat/registry.ts";
@@ -96,6 +97,7 @@ export class Daemon {
 			version: options.version,
 			enabledChannels,
 			allowed: (channel, userId) => this.allowed(channel, userId),
+			qqQuota: (chatId, lang) => this.qqQuota(chatId, lang),
 		});
 
 		this.scheduler = new Scheduler({
@@ -151,6 +153,12 @@ export class Daemon {
 			return (channels?.telegram?.allowedUsers ?? []).map(String).includes(userId);
 		}
 		return (channels?.qq?.allowedOpenIds ?? []).includes(userId);
+	}
+
+	/** The QQ quota line, when the QQ channel is running. */
+	private qqQuota(chatId: string, lang: Lang): string | undefined {
+		const adapter = this.registry.adapterFor("qq") as Partial<QqQuotaReporter> | undefined;
+		return adapter?.quotaLine?.(chatId, lang);
 	}
 
 	/** An empty allowlist silently ignores everyone, so say so at startup. */

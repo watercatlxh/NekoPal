@@ -53,13 +53,18 @@ export interface QqAdapterOptions {
 	socketFactory?: (url: string) => WebSocket;
 }
 
+/** The QQ adapter's quota reporting, which `/settings` shows. */
+export interface QqQuotaReporter {
+	quotaLine(openid: string, lang: Lang): string;
+}
+
 /** The QQ C2C channel: one WebSocket receive loop plus the markdown send pipeline. */
 export function createQqAdapter(options: QqAdapterOptions): Adapter {
 	return new QqAdapter(options);
 }
 
 /** Exported so the daemon can read the proactive quota for `/settings`. */
-export class QqAdapter implements Adapter {
+export class QqAdapter implements Adapter, QqQuotaReporter {
 	readonly name = "qq" as const;
 	readonly caps: Caps;
 
