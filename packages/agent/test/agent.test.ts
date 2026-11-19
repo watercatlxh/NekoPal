@@ -1,4 +1,4 @@
-import { type ClientIdentity, PI_ATTRIBUTION } from "@earendil-works/pi-ai";
+import type { ClientIdentity } from "@earendil-works/pi-ai";
 import {
 	type AssistantMessage,
 	createAssistantMessageEventStream,
@@ -615,7 +615,7 @@ describe("Agent", () => {
 		const agent = new Agent({ streamFn: unusedStreamFunction });
 
 		// Test setModel
-		const newModel = getModel("google", "gemini-2.5-flash");
+		const newModel = getModel("anthropic", "claude-haiku-4-5");
 		agent.state.model = newModel;
 		expect(agent.state.model).toBe(newModel);
 
@@ -1200,7 +1200,7 @@ describe("Agent", () => {
 		expect(receivedSessionId).toBe("session-def");
 	});
 
-	it("attributes requests to pi by default and merges a configured identity over it", async () => {
+	it("forwards a configured identity and keeps the default when none is set", async () => {
 		const received: (ClientIdentity | undefined)[] = [];
 		const agent = new Agent({
 			streamFn: (_model, _context, options) => {
@@ -1214,16 +1214,12 @@ describe("Agent", () => {
 		});
 
 		await agent.prompt("hello");
-		const acme = { name: "acme", url: "https://acme.example" };
-		agent.identity = { userAgent: "short", attribution: acme };
-		await agent.prompt("hello again");
 		agent.identity = { userAgent: "short" };
+		await agent.prompt("hello again");
+		agent.identity = { userAgent: "detailed" };
 		await agent.prompt("and again");
 
-		expect(received).toEqual([
-			{ attribution: PI_ATTRIBUTION },
-			{ attribution: acme, userAgent: "short" },
-			{ attribution: PI_ATTRIBUTION, userAgent: "short" },
-		]);
+		// NekoPal sends no attribution; the identity is whatever the host configured.
+		expect(received).toEqual([{}, { userAgent: "short" }, { userAgent: "detailed" }]);
 	});
 });

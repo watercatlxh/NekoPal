@@ -51,6 +51,10 @@ class FakeAdapter implements Adapter {
 		this.deleted.push(handle.id);
 	}
 	async sendFiles(): Promise<void> {}
+	openStream(): undefined {
+		return undefined;
+	}
+	async notifyWorking(): Promise<void> {}
 }
 
 const disposers: Array<() => Promise<void>> = [];
@@ -91,6 +95,9 @@ async function createHarness(options: { allowed?: string[] } = {}): Promise<Harn
 			id: entry.id,
 			name: entry.name,
 			api: entry.api,
+			reasoning: entry.reasoning,
+			input: entry.input,
+			cost: entry.cost,
 			contextWindow: entry.contextWindow,
 			maxTokens: entry.maxTokens,
 			baseUrl: entry.baseUrl,
@@ -174,7 +181,14 @@ function fauxText(text: string) {
 		api: "faux",
 		provider: "faux",
 		model: "faux-1",
-		usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: 0 },
+		usage: {
+			input: 1,
+			output: 1,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 2,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
 		stopReason: "stop" as const,
 		timestamp: Date.now(),
 	};

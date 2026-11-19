@@ -535,8 +535,8 @@ describe("SettingsManager", () => {
 			const manager = SettingsManager.create(projectDir, agentDir);
 			const nekopal = manager.getNekoPal();
 
-			expect(nekopal.memory.memoryChars).toBe(3000);
-			expect(nekopal.memory.userChars).toBe(1375);
+			expect(nekopal.memory?.memoryChars).toBe(3000);
+			expect(nekopal.memory?.userChars).toBe(1375);
 		});
 	});
 });

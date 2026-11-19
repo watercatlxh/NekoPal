@@ -40,7 +40,7 @@ describe("AgentSessionRuntime.takeUnreportedDiagnostics", () => {
 				cwd,
 				agentDir: tempDir,
 				modelRuntime,
-				resourceLoaderOptions: { noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true },
+				resourceLoaderOptions: { noExtensions: true, noSkills: true, noPromptTemplates: true },
 			});
 			return {
 				...(await createAgentSessionFromServices({

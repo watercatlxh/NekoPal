@@ -197,7 +197,10 @@ describe("compaction model overrides", () => {
 
 	it("reports a null model entry, which TOML cannot store", () => {
 		const manager = SettingsManager.inMemory();
-		manager.applyOverrides({ compaction: { modelOverrides: { [modelKey]: null } } });
+		// `null` is not a TOML value; the overrides channel is how a non-file source can still carry one.
+		manager.applyOverrides({
+			compaction: { modelOverrides: { [modelKey]: null } },
+		} as unknown as Parameters<typeof manager.applyOverrides>[0]);
 		expect(() => manager.getCompactionSettings(model)).toThrow(
 			`Invalid compaction.modelOverrides["${modelKey}"] setting: null. Expected an object.`,
 		);

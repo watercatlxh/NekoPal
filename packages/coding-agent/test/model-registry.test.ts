@@ -2,7 +2,13 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { normalizeContext } from "@earendil-works/pi-ai";
-import type { AnthropicMessagesCompat, Api, Model, OpenAICompletionsCompat } from "@earendil-works/pi-ai/compat";
+import type {
+	AnthropicMessagesCompat,
+	Api,
+	Model,
+	OpenAICompletionsCompat,
+	OpenAIResponsesCompat,
+} from "@earendil-works/pi-ai/compat";
 import { getApiProvider, getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
@@ -899,9 +905,12 @@ describe("ModelRegistry", () => {
 
 		test("model override with compat.openRouterRouting", async () => {
 			writeRawModelsJson({
-				anthropic: {
+				"my-gateway": {
+					baseUrl: "https://gateway.example.com/v1",
+					api: "openai-completions",
+					models: [{ id: "routed-model", name: "Routed Model" }],
 					modelOverrides: {
-						"claude-sonnet-4-5": {
+						"routed-model": {
 							compat: {
 								openRouterRouting: { only: ["amazon-bedrock"] },
 							},
@@ -911,31 +920,37 @@ describe("ModelRegistry", () => {
 			});
 
 			const registry = await createModelRegistry(authStorage, modelsJsonPath);
-			const models = getModelsForProvider(registry, "anthropic");
+			const models = getModelsForProvider(registry, "my-gateway");
 
-			const sonnet = models.find((m) => m.id === "claude-sonnet-4-5");
-			const compat = sonnet?.compat as AnthropicMessagesCompat | undefined;
+			const routed = models.find((m) => m.id === "routed-model");
+			const compat = routed?.compat as OpenAICompletionsCompat | undefined;
 			expect(compat?.openRouterRouting).toEqual({ only: ["amazon-bedrock"] });
 		});
 
 		test("supportsFinishReason can be configured at provider and model levels", async () => {
 			const provider: ModelsJsonProvider = {
+				baseUrl: "https://gateway.example.com/v1",
+				api: "openai-completions",
+				models: [
+					{ id: "overridden", name: "Overridden" },
+					{ id: "inherited", name: "Inherited" },
+				],
 				compat: { supportsFinishReason: true },
 				modelOverrides: {
-					"claude-sonnet-4-5": {
+					overridden: {
 						compat: { supportsFinishReason: false },
 					},
 				},
 			};
-			writeRawModelsJson({ anthropic: provider });
+			writeRawModelsJson({ "my-gateway": provider });
 
 			const registry = await createModelRegistry(authStorage, modelsJsonPath);
-			const models = getModelsForProvider(registry, "anthropic");
-			const sonnet = models.find((model) => model.id === "claude-sonnet-4-5");
-			const opus = models.find((model) => model.id === "claude-opus-4-5");
+			const models = getModelsForProvider(registry, "my-gateway");
+			const overridden = models.find((model) => model.id === "overridden");
+			const inherited = models.find((model) => model.id === "inherited");
 
-			expect((sonnet?.compat as AnthropicMessagesCompat | undefined)?.supportsFinishReason).toBe(false);
-			expect((opus?.compat as AnthropicMessagesCompat | undefined)?.supportsFinishReason).toBe(true);
+			expect((overridden?.compat as OpenAICompletionsCompat | undefined)?.supportsFinishReason).toBe(false);
+			expect((inherited?.compat as OpenAICompletionsCompat | undefined)?.supportsFinishReason).toBe(true);
 		});
 
 		test("built-in models inherit prompt cache key support unless overridden", async () => {
@@ -956,9 +971,13 @@ describe("ModelRegistry", () => {
 
 		test("model override deep merges compat settings", async () => {
 			writeRawModelsJson({
-				anthropic: {
+				"my-gateway": {
+					baseUrl: "https://gateway.example.com/v1",
+					api: "openai-completions",
+					models: [{ id: "routed-model", name: "Routed Model" }],
+					compat: { supportsStrictMode: true },
 					modelOverrides: {
-						"claude-sonnet-4-5": {
+						"routed-model": {
 							compat: {
 								openRouterRouting: { order: ["anthropic", "together"] },
 							},
@@ -968,23 +987,29 @@ describe("ModelRegistry", () => {
 			});
 
 			const registry = await createModelRegistry(authStorage, modelsJsonPath);
-			const models = getModelsForProvider(registry, "anthropic");
-			const sonnet = models.find((m) => m.id === "claude-sonnet-4-5");
+			const models = getModelsForProvider(registry, "my-gateway");
+			const routed = models.find((m) => m.id === "routed-model");
 
 			// Should have both the new routing AND preserve other compat settings
-			const compat = sonnet?.compat as AnthropicMessagesCompat | undefined;
+			const compat = routed?.compat as OpenAICompletionsCompat | undefined;
 			expect(compat?.openRouterRouting).toEqual({ order: ["anthropic", "together"] });
-			expect(compat?.supportsStrictTools).toBe(true);
+			expect(compat?.supportsStrictMode).toBe(true);
 		});
 
 		test("multiple model overrides on same provider", async () => {
 			writeRawModelsJson({
-				anthropic: {
+				"my-gateway": {
+					baseUrl: "https://gateway.example.com/v1",
+					api: "openai-completions",
+					models: [
+						{ id: "first-model", name: "First Model" },
+						{ id: "second-model", name: "Second Model" },
+					],
 					modelOverrides: {
-						"claude-sonnet-4-5": {
+						"first-model": {
 							compat: { openRouterRouting: { only: ["amazon-bedrock"] } },
 						},
-						"claude-opus-4-5": {
+						"second-model": {
 							compat: { openRouterRouting: { only: ["anthropic"] } },
 						},
 					},
@@ -992,15 +1017,15 @@ describe("ModelRegistry", () => {
 			});
 
 			const registry = await createModelRegistry(authStorage, modelsJsonPath);
-			const models = getModelsForProvider(registry, "anthropic");
+			const models = getModelsForProvider(registry, "my-gateway");
 
-			const sonnet = models.find((m) => m.id === "claude-sonnet-4-5");
-			const opus = models.find((m) => m.id === "claude-opus-4-5");
+			const first = models.find((m) => m.id === "first-model");
+			const second = models.find((m) => m.id === "second-model");
 
-			const sonnetCompat = sonnet?.compat as AnthropicMessagesCompat | undefined;
-			const opusCompat = opus?.compat as AnthropicMessagesCompat | undefined;
-			expect(sonnetCompat?.openRouterRouting).toEqual({ only: ["amazon-bedrock"] });
-			expect(opusCompat?.openRouterRouting).toEqual({ only: ["anthropic"] });
+			const firstCompat = first?.compat as OpenAICompletionsCompat | undefined;
+			const secondCompat = second?.compat as OpenAICompletionsCompat | undefined;
+			expect(firstCompat?.openRouterRouting).toEqual({ only: ["amazon-bedrock"] });
+			expect(secondCompat?.openRouterRouting).toEqual({ only: ["anthropic"] });
 		});
 
 		test("model override combined with baseUrl override", async () => {

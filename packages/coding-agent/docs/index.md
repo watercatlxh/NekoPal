@@ -1,39 +1,57 @@
-# Pi
+# NekoPal
 
-Pi is an extensible AI agent that works from your terminal. Give it a goal and a working folder, and it can inspect files, run commands, edit content, and work through multi-step tasks.
+NekoPal is a personal assistant that lives in your chat apps. It runs as a single headless daemon on
+your own machine and talks to you through a Telegram private chat or a QQ C2C chat. Behind the chat
+there is the pi agent harness: file access, shell, skills, bounded memory, scheduled runs and
+extensions.
 
-Use Pi for software development, research notes, writing projects, data files, or hobby work. You can use Pi as is, prompt it to adapt itself to your workflow, or build other applications powered by Pi using the SDK.
+There is no terminal UI and no command-line interface. The daemon reads one
+[`settings.toml`](configuration.md), starts the channels that are enabled, and answers messages.
+Everything you would otherwise do in a terminal — signing in, changing the model, reviewing memory —
+happens with a [chat command](slash-commands.md).
 
-## Start using Pi
+This documentation covers the harness and the daemon internals: configuration, extensions, skills,
+sessions, MCP and the SDK. The repository [README](../../../README.md) describes the project as a
+whole.
 
-New to Pi? Follow the [Quickstart](quickstart.md) to install Pi, connect a model, and complete your first task.
+## Start using NekoPal
 
-If Pi is already installed, choose what you want to do:
+New here? Follow the [Quickstart](quickstart.md) to build the daemon, configure a channel, and send
+the first message.
 
-- [Use Pi interactively](usage.md) to add files, run commands, direct ongoing work, and export results.
-- [Choose a model](models.md) or connect a subscription, API key, local model, or compatible endpoint.
-- [Continue or branch a session](sessions.md) to resume work or explore another approach without losing history.
-- [Configure Pi](configuration.md) for your preferences, working folders, instructions, and reusable resources.
-- [Understand how Pi works](how-pi-works.md), including tools, context, sessions, and the agent loop.
+If NekoPal is already running, choose what you want to do:
 
-## Customize Pi
+- [Chat commands](slash-commands.md) lists every `/command`, including `/login`, `/model`, `/memory`
+  and `/jobs`.
+- [Choose a model](models.md) covers the four OAuth providers and custom endpoints in `models.json`.
+- [Continue or branch a session](sessions.md) to resume earlier conversations.
+- [Configure NekoPal](configuration.md) for the data directory, settings, and `[nekopal]` table.
+- [Understand how it works](how-pi-works.md), including tools, context, sessions, and the agent loop.
 
-Pi can reuse prompts, load specialized instructions, add executable integrations, change its terminal interface, connect model services, and distribute these resources as packages.
-Use the [Quickstart customization chooser](quickstart.md#choose-how-to-customize-pi) to select the smallest mechanism that meets your need.
+## Customize NekoPal
 
-## Automate or embed Pi
+NekoPal loads pi extensions unchanged, reuses prompt templates, loads skills, and installs pi
+packages. Extensions that draw terminal UI are the one exception: the terminal UI package is not
+shipped, so an extension that imports it fails to load with an explicit error.
 
-- Use [print mode](cli.md#invocation-and-output) for one-off and scripted tasks.
-- Use [JSON event stream mode](json.md) to consume structured events from one run.
-- Use [RPC mode](rpc.md) to control a separate Pi process.
-- Use the [TypeScript SDK](sdk.md) to run Pi inside an application.
+- [Extensions](extensions.md) add tools, commands and event handlers.
+- [Skills](skills.md) add task-specific instructions and supporting files.
+- [Prompt templates](prompt-templates.md) add reusable message text.
+- [Pi packages](packages.md) distribute these resources through npm or git.
+- [MCP servers](mcp.md) connect external tool servers.
 
-## Find reference and setup information
+## Embed NekoPal
 
-Use the reference pages to look up [CLI options](cli.md), [settings](settings.md), [providers](providers.md), [keybindings](keybindings.md), and [environment variables](environment-variables.md).
+The harness is a library. Use the [TypeScript SDK](sdk.md) to create and drive agent sessions from
+your own Node.js or Bun process.
 
-For platform-specific help, see [Terminal Setup](terminal-setup.md), [Windows](windows.md), [tmux](tmux.md), [Termux on Android](termux.md), or [Containerization](containerization.md).
+## Find reference information
+
+Use the reference pages to look up [chat commands](slash-commands.md), [settings](settings.md),
+[providers](providers.md), and [environment variables](environment-variables.md).
 
 ## Work safely
 
-Pi's tools and extensions run with the permissions of the Pi process. Project trust controls which project resources Pi loads, but it does not sandbox tool calls. Review [Security](security.md) before using untrusted files, repositories, extensions, or unattended automation.
+NekoPal's tools and extensions run with the permissions of the daemon process. It does not ask before
+every tool call, and `bash` can write any file the process can write. Review [Security](security.md)
+before giving it access to untrusted files, repositories, or unattended automation.

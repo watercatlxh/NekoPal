@@ -38,5 +38,5 @@
 		"packages/ai/catalog/**/*",
 		"packages/agent/examples/**/*"
 	],
-	"exclude": ["**/dist/**"]
+	"exclude": ["**/dist/**", "packages/*/test/fixtures/**"]
 }
