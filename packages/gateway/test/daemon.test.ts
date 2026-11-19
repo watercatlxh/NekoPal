@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { Adapter, Caps, SentHandle } from "../src/channel/types.ts";
 import { Daemon } from "../src/daemon.ts";
 import { StateStore } from "../src/state.ts";
+import { createHarness } from "./support/harness.ts";
 
 const caps: Caps = { edit: true, stream: false, maxChars: 4_000 };
 
@@ -95,6 +96,15 @@ describe("Daemon", () => {
 
 		await daemon.stop();
 		expect(adapter.stopped).toBe(true);
+	});
+
+	it("answers /settings with the live panel", async () => {
+		const harness = await createHarness();
+		await harness.deliver("/settings");
+		const panel = await harness.adapter.next("NekoPal settings");
+		expect(panel).toContain("Language: en");
+		expect(panel).toContain("Memory:");
+		expect(panel).toContain("Channels: telegram");
 	});
 
 	it("exposes the command list a platform menu needs", async () => {
