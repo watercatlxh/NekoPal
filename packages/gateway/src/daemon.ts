@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { setProtectedPaths } from "@earendil-works/pi-coding-agent";
 import type { QqQuotaReporter } from "./channel/qq/adapter.ts";
@@ -11,17 +12,7 @@ import { t } from "./i18n/index.ts";
 import { log, logError } from "./log.ts";
 import { SkillStore } from "./memory/skills.ts";
 import { MemoryStore, PendingStore } from "./memory/store.ts";
-import {
-	AUTH_PATH,
-	CRON_DIR,
-	MEMORY_DIR,
-	PENDING_DIR,
-	SESSIONS_DIR,
-	SETTINGS_BACKUP_PATH,
-	SETTINGS_PATH,
-	SKILLS_DIR,
-	STATE_PATH,
-} from "./paths.ts";
+import { CRON_DIR, MEMORY_DIR, PENDING_DIR, SESSIONS_DIR, SKILLS_DIR } from "./paths.ts";
 import type { StateStore } from "./state.ts";
 
 export interface DaemonOptions {
@@ -117,11 +108,14 @@ export class Daemon {
 	/** Start adapters, the scheduler and every open chat. */
 	async start(): Promise<void> {
 		this.warnEmptyAllowlists();
+		// Paths come from the configured data directory, which is `~/.nekopal` unless NEKOPAL_HOME
+		// overrides it; a test or an embedder may pass another.
+		const dataDir = this.options.agentDir;
 		setProtectedPaths([
-			{ path: SETTINGS_PATH, message: "settings.toml is protected; change it with config_set" },
-			{ path: SETTINGS_BACKUP_PATH, message: "settings.toml.bak is protected" },
-			{ path: AUTH_PATH, message: "auth.json is protected; use /login and /logout" },
-			{ path: STATE_PATH, message: "state.json is protected" },
+			{ path: join(dataDir, "settings.toml"), message: "settings.toml is protected; change it with config_set" },
+			{ path: join(dataDir, "settings.toml.bak"), message: "settings.toml.bak is protected" },
+			{ path: join(dataDir, "auth.json"), message: "auth.json is protected; use /login and /logout" },
+			{ path: join(dataDir, "state.json"), message: "state.json is protected" },
 		]);
 		for (const adapter of this.options.adapters) {
 			await adapter.start((message) => this.dispatcher.handle(message));
@@ -181,9 +175,10 @@ export class Daemon {
 		for (const value of [channels?.telegram?.botToken, channels?.qq?.appSecret]) {
 			if (typeof value === "string" && !value.startsWith("$") && !value.startsWith("!")) values.push(value);
 		}
-		if (existsSync(AUTH_PATH)) {
+		const authPath = join(this.options.agentDir, "auth.json");
+		if (existsSync(authPath)) {
 			try {
-				const parsed = JSON.parse(readFileSync(AUTH_PATH, "utf-8")) as Record<string, unknown>;
+				const parsed = JSON.parse(readFileSync(authPath, "utf-8")) as Record<string, unknown>;
 				for (const credential of Object.values(parsed)) {
 					const record = credential as { access?: unknown; refresh?: unknown; key?: unknown };
 					for (const value of [record.access, record.refresh, record.key]) {
