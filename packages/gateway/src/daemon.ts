@@ -92,6 +92,7 @@ export class Daemon {
 			pending: this.pending,
 			jobs: this.jobs,
 			agentDir: options.agentDir,
+			workspace: options.workspace,
 			skills: this.skills,
 			startedAt: this.startedAt,
 			version: options.version,

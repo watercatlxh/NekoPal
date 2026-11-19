@@ -25,6 +25,8 @@ export interface DispatcherOptions {
 	pending: PendingStore;
 	jobs: JobStore;
 	agentDir: string;
+	/** The agent's working directory; attachments are saved under its `inbox`. */
+	workspace: string;
 	skills: { apply(operations: import("../memory/store.ts").MemoryOperation[]): void };
 	startedAt: number;
 	version: string;
@@ -119,7 +121,7 @@ export class Dispatcher {
 		for (const attachment of message.attachments) {
 			if (attachment.kind === "image") continue;
 			const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
-			const dir = join(this.options.agentDir, "workspace", "inbox");
+			const dir = join(this.options.workspace, "inbox");
 			mkdirSync(dir, { recursive: true });
 			const path = join(dir, `${stamp}-${attachment.fileName}`);
 			writeFileSync(path, attachment.data);

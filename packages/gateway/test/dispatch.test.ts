@@ -135,6 +135,7 @@ async function createHarness(options: { allowed?: string[] } = {}): Promise<Harn
 		pending,
 		jobs,
 		agentDir,
+		workspace,
 		skills,
 		startedAt: Date.now(),
 		version: "0.1.0",
