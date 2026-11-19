@@ -21,29 +21,35 @@ function emptyState(): State {
 export class StateStore {
 	private state: State;
 	private timer: NodeJS.Timeout | undefined;
+	private readonly path: string;
 
-	private constructor(state: State) {
+	private constructor(state: State, path: string) {
 		this.state = state;
+		this.path = path;
 	}
 
-	static load(): StateStore {
-		if (!existsSync(STATE_PATH)) return new StateStore(emptyState());
+	/** Read the state file of `path`, which defaults to the process-wide data directory. */
+	static load(path: string = STATE_PATH): StateStore {
+		if (!existsSync(path)) return new StateStore(emptyState(), path);
 		try {
-			const parsed = JSON.parse(readFileSync(STATE_PATH, "utf-8")) as Partial<State>;
-			return new StateStore({
-				chats: parsed.chats ?? {},
-				telegram: { offset: parsed.telegram?.offset ?? 0 },
-				qq: { day: parsed.qq?.day ?? "", sentToday: parsed.qq?.sentToday ?? {} },
-			});
+			const parsed = JSON.parse(readFileSync(path, "utf-8")) as Partial<State>;
+			return new StateStore(
+				{
+					chats: parsed.chats ?? {},
+					telegram: { offset: parsed.telegram?.offset ?? 0 },
+					qq: { day: parsed.qq?.day ?? "", sentToday: parsed.qq?.sentToday ?? {} },
+				},
+				path,
+			);
 		} catch (error) {
-			const backup = `${STATE_PATH}.corrupt-${Date.now()}`;
+			const backup = `${path}.corrupt-${Date.now()}`;
 			try {
-				renameSync(STATE_PATH, backup);
+				renameSync(path, backup);
 			} catch {
 				// Nothing else to do: the corrupt file stays where it is.
 			}
 			logError(`could not read state.json, starting fresh (backup: ${backup})`, error);
-			return new StateStore(emptyState());
+			return new StateStore(emptyState(), path);
 		}
 	}
 
@@ -83,10 +89,10 @@ export class StateStore {
 	flush(): void {
 		clearTimeout(this.timer);
 		this.timer = undefined;
-		const temp = `${STATE_PATH}.tmp`;
+		const temp = `${this.path}.tmp`;
 		try {
 			writeFileSync(temp, `${JSON.stringify(this.state, null, "\t")}\n`, "utf-8");
-			renameSync(temp, STATE_PATH);
+			renameSync(temp, this.path);
 		} catch (error) {
 			logError("could not write state.json", error);
 		}

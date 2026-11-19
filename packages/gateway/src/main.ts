@@ -61,7 +61,7 @@ async function main(): Promise<number> {
 	mkdirSync(HOME, { recursive: true });
 	const settingsManager = SettingsManager.create(HOME, HOME);
 	const settings = settingsManager.getNekoPal();
-	const state = StateStore.load();
+	const state = StateStore.load(join(HOME, "state.json"));
 	const adapters = await createAdapters(settingsManager, state, commandMenu(settings.defaultLang ?? "en"));
 	if (adapters.length === 0) {
 		process.stderr.write(`${Daemon.noChannelMessage(settings.defaultLang ?? "en")}\n`);
