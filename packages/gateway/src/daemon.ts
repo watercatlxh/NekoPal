@@ -113,6 +113,7 @@ export class Daemon {
 
 	/** Start adapters, the scheduler and every open chat. */
 	async start(): Promise<void> {
+		this.warnEmptyAllowlists();
 		setProtectedPaths([
 			{ path: SETTINGS_PATH, message: "settings.toml is protected; change it with config_set" },
 			{ path: SETTINGS_BACKUP_PATH, message: "settings.toml.bak is protected" },
@@ -150,6 +151,18 @@ export class Daemon {
 			return (channels?.telegram?.allowedUsers ?? []).map(String).includes(userId);
 		}
 		return (channels?.qq?.allowedOpenIds ?? []).includes(userId);
+	}
+
+	/** An empty allowlist silently ignores everyone, so say so at startup. */
+	private warnEmptyAllowlists(): void {
+		for (const adapter of this.options.adapters) {
+			const channels = this.options.settingsManager.getNekoPal().channels;
+			const list =
+				adapter.name === "telegram" ? channels?.telegram?.allowedUsers : channels?.qq?.allowedOpenIds;
+			if ((list ?? []).length === 0) {
+				log("warn", `${adapter.name} allowlist is empty; every message will be ignored`);
+			}
+		}
 	}
 
 	/** Values the redactor masks: channel secrets resolved from settings, plus the auth file's tokens. */

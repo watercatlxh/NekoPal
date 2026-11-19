@@ -98,9 +98,6 @@ export class QqAdapter implements Adapter {
 			);
 			return;
 		}
-		if ((qq?.allowedOpenIds ?? []).length === 0) {
-			this.options.log("warn", "qq allowlist is empty; every message will be ignored");
-		}
 
 		const token = new TokenProvider({ appId, appSecret, fetchImpl: this.options.fetchImpl });
 		const api = new QqApi({ token, fetchImpl: this.options.fetchImpl });
