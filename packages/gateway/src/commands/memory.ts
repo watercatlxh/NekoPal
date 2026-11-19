@@ -2,6 +2,27 @@ import type { Lang } from "../channel/types.ts";
 import { t } from "../i18n/index.ts";
 import type { MemoryStore, PendingMemory } from "../memory/store.ts";
 
+/** One stored entry, numbered the way `/memory list` prints it. */
+export interface StoredEntry {
+	/** 1-based number across both stores. */
+	number: number;
+	target: "memory" | "user";
+	/** 1-based position inside its own store, which is what `MemoryStore.forget` takes. */
+	index: number;
+	text: string;
+}
+
+/** Every stored entry, memory first, numbered as `/memory list` shows them. */
+export function storedEntries(store: MemoryStore): StoredEntry[] {
+	const entries: StoredEntry[] = [];
+	for (const target of ["memory", "user"] as const) {
+		for (const [index, text] of store.entries(target).entries()) {
+			entries.push({ number: entries.length + 1, target, index: index + 1, text });
+		}
+	}
+	return entries;
+}
+
 /** Character counts of both stores. */
 export function formatUsage(store: MemoryStore): { memory: number; user: number } {
 	return store.usage();
@@ -9,14 +30,11 @@ export function formatUsage(store: MemoryStore): { memory: number; user: number 
 
 /** Numbered stored entries, so `/memory forget <n>` can address them. */
 export function formatStored(store: MemoryStore): string {
-	const lines: string[] = [];
-	let index = 1;
-	for (const target of ["memory", "user"] as const) {
-		for (const entry of store.entries(target)) {
-			const text = entry.replace(/\s+/g, " ");
-			lines.push(`${index++}. [${target}] ${text.length > 80 ? `${text.slice(0, 77)}…` : text}`);
-		}
-	}
+	const lines = storedEntries(store).map((entry) => {
+		const text = entry.text.replace(/\s+/g, " ");
+		const shown = text.length > 80 ? `${text.slice(0, 77)}…` : text;
+		return `${entry.number}. [${entry.target}] ${shown}`;
+	});
 	return lines.length === 0 ? "" : lines.join("\n");
 }
 

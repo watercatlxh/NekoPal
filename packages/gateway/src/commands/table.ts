@@ -3,11 +3,12 @@ import type { Lang } from "../channel/types.ts";
 import type { ChatContext } from "../chat/context.ts";
 import { nextRun } from "../cron/schedule.ts";
 import { t } from "../i18n/index.ts";
+import { logError } from "../log.ts";
 import type { CommandContext, CommandTable } from "./index.ts";
 import { describe, descriptionOf, formatUptime, modelLabel, parseSchedule, resolveModel } from "./index.ts";
 import { formatJobs } from "./jobs.ts";
 import { loginCommand, logoutCommand } from "./login.ts";
-import { formatPending, formatStored, formatUsage } from "./memory.ts";
+import { formatPending, formatStored, formatUsage, storedEntries } from "./memory.ts";
 
 const HELP_ORDER = [
 	"help",
@@ -220,6 +221,7 @@ export function createCommands(): CommandTable {
 					return;
 				}
 				let applied = 0;
+				let skillsChanged = false;
 				for (const entry of chosen) {
 					if (action === "reject") {
 						context.pending.remove(entry.id);
@@ -229,6 +231,7 @@ export function createCommands(): CommandTable {
 					try {
 						if (entry.target === "skill") {
 							context.skills.apply(entry.operations);
+							skillsChanged = true;
 						} else {
 							context.memory.apply(entry.target, entry.operations);
 						}
@@ -238,14 +241,24 @@ export function createCommands(): CommandTable {
 						await chat.sendPlain(error instanceof Error ? error.message : String(error));
 					}
 				}
+				// A new skill only enters the index on reload, and every chat shares the skills directory.
+				if (skillsChanged) {
+					for (const other of context.registry.all()) {
+						await other.session.reload().catch((error: unknown) => logError("could not reload a chat", error));
+					}
+				}
 				await chat.say(action === "approve" ? "memory.approved" : "memory.rejected", { n: applied });
 				return;
 			}
 
 			if (action === "forget") {
-				const index = Number(ref);
-				const target = context.memory.entries("memory").length > 0 ? "memory" : "user";
-				const removed = context.memory.forget(target, index);
+				// `/memory list` numbers both stores in one sequence, so map back to the store index.
+				const entry = storedEntries(context.memory).find((candidate) => candidate.number === Number(ref));
+				if (!entry) {
+					await chat.say("memory.notFound", { n: ref });
+					return;
+				}
+				const removed = context.memory.forget(entry.target, entry.index);
 				await chat.say("memory.forgot", { entry: removed.slice(0, 60) });
 				return;
 			}

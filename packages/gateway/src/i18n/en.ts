@@ -52,6 +52,7 @@ export const messages = {
 	"memory.forgot": "✅ Forgot {{entry}}",
 	"memory.pendingNotice": "🧠 {{n}} memory suggestions to review → /memory list",
 	"memory.nonePending": "Nothing waiting for approval",
+	"memory.notFound": "No stored entry #{{n}}; see /memory list",
 	"memory.budgetExceeded": "{{file}} would be {{size}}/{{budget}} chars; remove or patch entries first",
 	"jobs.empty": "No scheduled jobs",
 	"jobs.list": "Scheduled jobs:\n{{entries}}",

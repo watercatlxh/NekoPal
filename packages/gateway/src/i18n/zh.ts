@@ -54,6 +54,7 @@ export const messages: Record<keyof typeof en, string> = {
 	"memory.forgot": "✅ 已忘记 {{entry}}",
 	"memory.pendingNotice": "🧠 {{n}} 条记忆建议待审 → /memory list",
 	"memory.nonePending": "没有待审的记忆",
+	"memory.notFound": "没有第 {{n}} 条记忆，请用 /memory list 查看",
 	"memory.budgetExceeded": "{{file}} 会达到 {{size}}/{{budget}} 字；请先删除或修改已有条目",
 	"jobs.empty": "没有定时任务",
 	"jobs.list": "定时任务：\n{{entries}}",
