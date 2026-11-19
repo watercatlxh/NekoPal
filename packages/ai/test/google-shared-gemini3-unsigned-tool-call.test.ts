@@ -3,15 +3,14 @@ import { convertMessages, requiresToolCallId } from "../src/api/google-shared.ts
 import type { Context, Model } from "../src/types.ts";
 import { normalizeContext } from "../src/utils/transcript.ts";
 
-function makeGemini3Model<TApi extends "google-generative-ai" | "google-vertex">(
-	api: TApi,
-	provider: Model<TApi>["provider"],
+function makeGemini3Model(
+	provider: Model<"google-generative-ai">["provider"],
 	id = "gemini-3-pro-preview",
-): Model<TApi> {
+): Model<"google-generative-ai"> {
 	return {
 		id,
 		name: "Gemini 3 Pro Preview",
-		api,
+		api: "google-generative-ai",
 		provider,
 		baseUrl: "https://example.com",
 		reasoning: true,
@@ -79,26 +78,25 @@ function makeContext(model: { api: string; provider: string; id: string }, thoug
 }
 
 describe("google-shared convertMessages — Gemini 3 unsigned tool calls", () => {
-	it.each([
-		makeGemini3Model("google-generative-ai", "google"),
-		makeGemini3Model("google-generative-ai", "google", "gemini-3.6-flash"),
-		makeGemini3Model("google-vertex", "google-vertex"),
-	])("preserves tool call IDs for $id via $api history", (model) => {
-		const context = makeContext(model);
-		const contents = convertMessages(model, normalizeContext(context));
-		const functionCallIds = contents
-			.flatMap((content) => content.parts ?? [])
-			.flatMap((part) => (part.functionCall?.id ? [part.functionCall.id] : []));
-		const functionResponseIds = contents
-			.flatMap((content) => content.parts ?? [])
-			.flatMap((part) => (part.functionResponse?.id ? [part.functionResponse.id] : []));
+	it.each([makeGemini3Model("google"), makeGemini3Model("google", "gemini-3.6-flash")])(
+		"preserves tool call IDs for $id",
+		(model) => {
+			const context = makeContext(model);
+			const contents = convertMessages(model, normalizeContext(context));
+			const functionCallIds = contents
+				.flatMap((content) => content.parts ?? [])
+				.flatMap((part) => (part.functionCall?.id ? [part.functionCall.id] : []));
+			const functionResponseIds = contents
+				.flatMap((content) => content.parts ?? [])
+				.flatMap((part) => (part.functionResponse?.id ? [part.functionResponse.id] : []));
 
-		expect(functionCallIds).toEqual(["call_1", "call_2"]);
-		expect(functionResponseIds).toEqual(["call_1", "call_2"]);
-	});
+			expect(functionCallIds).toEqual(["call_1", "call_2"]);
+			expect(functionResponseIds).toEqual(["call_1", "call_2"]);
+		},
+	);
 
 	it("does not add skip_thought_signature_validator for unsigned Google Gen AI tool calls", () => {
-		const model = makeGemini3Model("google-generative-ai", "google");
+		const model = makeGemini3Model("google");
 		const contents = convertMessages(model, normalizeContext(makeContext({ ...model, id: "other-model" })));
 
 		const modelTurn = contents.find((c) => c.role === "model");
@@ -115,20 +113,8 @@ describe("google-shared convertMessages — Gemini 3 unsigned tool calls", () =>
 		expect(historicalText).toHaveLength(0);
 	});
 
-	it("does not add skip_thought_signature_validator for unsigned Vertex tool calls", () => {
-		const model = makeGemini3Model("google-vertex", "google-vertex");
-		const contents = convertMessages(model, normalizeContext(makeContext(model)));
-		const modelTurn = contents.find((c) => c.role === "model");
-		const functionCallParts = modelTurn?.parts?.filter((p) => p.functionCall !== undefined) ?? [];
-
-		expect(functionCallParts).toHaveLength(2);
-		expect(functionCallParts[0]?.thoughtSignature).toBeUndefined();
-		expect(functionCallParts[1]?.thoughtSignature).toBeUndefined();
-		expect(JSON.stringify(modelTurn)).not.toContain("skip_thought_signature_validator");
-	});
-
 	it("preserves valid thoughtSignature when present for the same provider and model", () => {
-		const model = makeGemini3Model("google-generative-ai", "google");
+		const model = makeGemini3Model("google");
 		const validSig = "AAAAAAAAAAAAAAAAAAAAAA==";
 		const contents = convertMessages(model, normalizeContext(makeContext(model, validSig)));
 		const modelTurn = contents.find((c) => c.role === "model");
@@ -140,7 +126,7 @@ describe("google-shared convertMessages — Gemini 3 unsigned tool calls", () =>
 	});
 
 	it("does not add a thoughtSignature for non-Gemini-3 models", () => {
-		const model = makeGemini3Model("google-generative-ai", "google", "gemini-2.5-flash");
+		const model = makeGemini3Model("google", "gemini-2.5-flash");
 		const contents = convertMessages(model, normalizeContext(makeContext({ ...model, id: "other-model" })));
 		const modelTurn = contents.find((c) => c.role === "model");
 		const functionCallParts = modelTurn?.parts?.filter((part) => part.functionCall !== undefined) ?? [];

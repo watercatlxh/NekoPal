@@ -104,7 +104,7 @@ function describePackageInstallFailure(failure: PackageInstallFailure): string {
 	const hint =
 		failure.scope === "temporary"
 			? "Check the source and try again."
-			: `Run "${APP_NAME} remove ${failure.source}${failure.scope === "project" ? " --local" : ""}" to remove it from settings.json.`;
+			: `Run "${APP_NAME} remove ${failure.source}${failure.scope === "project" ? " --local" : ""}" to remove it from settings.toml.`;
 	return `failed to install (${failure.message}). ${hint}`;
 }
 

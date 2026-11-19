@@ -1,0 +1,113 @@
+import type { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { log, logError } from "../log.ts";
+import type { Adapter, ChannelName, Inbound, Lang } from "../channel/types.ts";
+import { languageFromCode } from "../i18n/index.ts";
+import type { StateStore } from "../state.ts";
+import type { MemoryStore, PendingStore } from "../memory/store.ts";
+import type { JobStore } from "../cron/store.ts";
+import type { NekoPalExtensionOptions } from "../extension/nekopal-extension.ts";
+import { ChatContext } from "./context.ts";
+
+export interface ChatRegistryOptions {
+	state: StateStore;
+	workspace: string;
+	agentDir: string;
+	settingsManager: SettingsManager;
+	modelRuntime: ModelRuntime;
+	memory: MemoryStore;
+	pending: PendingStore;
+	jobs: JobStore;
+	redactor: NekoPalExtensionOptions["redactor"];
+	defaultLang: Lang;
+}
+
+/** One ChatContext per channel chat, created on first use. */
+export class ChatRegistry {
+	private readonly options: ChatRegistryOptions;
+	private readonly chats = new Map<string, ChatContext>();
+	private readonly adapters = new Map<string, Adapter>();
+
+	constructor(options: ChatRegistryOptions) {
+		this.options = options;
+	}
+
+	registerAdapter(adapter: Adapter): void {
+		this.adapters.set(adapter.name, adapter);
+	}
+
+	adapterFor(name: ChannelName): Adapter | undefined {
+		return this.adapters.get(name);
+	}
+
+	get size(): number {
+		return this.chats.size;
+	}
+
+	all(): ChatContext[] {
+		return [...this.chats.values()];
+	}
+
+	get running(): number {
+		return this.all().filter((chat) => chat.isRunning).length;
+	}
+
+	/** Language a delivery to `chatId` uses: the open chat's, else the stored one, else the default. */
+	langFor(channel: string, chatId: string): Lang {
+		const key = `${channel}-${chatId}`;
+		return this.chats.get(key)?.lang ?? this.options.state.chats[key]?.lang ?? this.options.defaultLang;
+	}
+
+	/** The chat for a message, created and started on first contact. */
+	async chatFor(message: Inbound): Promise<ChatContext> {
+		const key = `${message.channel}-${message.chatId}`;
+		const existing = this.chats.get(key);
+		if (existing) return existing;
+
+		const adapter = this.adapters.get(message.channel);
+		if (!adapter) throw new Error(`No adapter for ${message.channel}`);
+		const lang =
+			this.options.state.chats[key]?.lang ?? languageFromCode(message.languageCode) ?? this.options.defaultLang;
+		const context = new ChatContext({
+			adapter,
+			chatId: message.chatId,
+			userId: message.userId,
+			lang,
+			workspace: this.options.workspace,
+			agentDir: this.options.agentDir,
+			settingsManager: this.options.settingsManager,
+			modelRuntime: this.options.modelRuntime,
+			memory: this.options.memory,
+			pending: this.options.pending,
+			jobs: this.options.jobs,
+			redactor: this.options.redactor,
+			onPromptNotice: (text) => {
+				void context.sendPlain(text);
+			},
+		});
+		context.setReviewEveryTurns(this.options.settingsManager.getNekoPal().memory?.reviewEveryTurns ?? 0);
+		this.chats.set(key, context);
+		await context.start();
+		log("info", `opened chat ${key}`);
+		return context;
+	}
+
+	/** Set a chat's language and persist it. */
+	setLang(key: string, lang: Lang): void {
+		this.options.state.mutate((state) => {
+			state.chats[key] = { ...state.chats[key], lang };
+		});
+		const chat = this.chats.get(key);
+		if (chat) chat.lang = lang;
+	}
+
+	async dispose(): Promise<void> {
+		for (const chat of this.chats.values()) {
+			try {
+				await chat.dispose();
+			} catch (error) {
+				logError("could not dispose a chat", error);
+			}
+		}
+		this.chats.clear();
+	}
+}

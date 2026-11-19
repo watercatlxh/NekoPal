@@ -25,7 +25,7 @@ describe("buildSystemPrompt", () => {
 			expect(prompt).toContain("<tools>\n(none)\n");
 		});
 
-		test("shows file paths guideline even with no tools", () => {
+		test("shows the unconditional rules even with no tools", () => {
 			const prompt = buildSystemPrompt({
 				selectedTools: [],
 				contextFiles: [],
@@ -33,7 +33,20 @@ describe("buildSystemPrompt", () => {
 				cwd: process.cwd(),
 			});
 
-			expect(prompt).toContain("Show file paths clearly");
+			expect(prompt).not.toContain("Show file paths clearly");
+			expect(prompt).toContain("Answer casual questions directly, without tools");
+			expect(prompt).toContain("Reply in the language the user writes in");
+		});
+
+		test("shows the file paths guideline when a file tool is selected", () => {
+			const prompt = buildSystemPrompt({
+				selectedTools: ["read"],
+				contextFiles: [],
+				skills: [],
+				cwd: process.cwd(),
+			});
+
+			expect(prompt).toContain("Show file paths clearly when working with files");
 		});
 	});
 
@@ -48,9 +61,7 @@ describe("buildSystemPrompt", () => {
 				skills: [],
 			});
 
-			expect(defaultPrompt.startsWith("You are a coding assistant running inside pi, a coding agent harness.")).toBe(
-				true,
-			);
+			expect(defaultPrompt.startsWith("You are NekoPal, a personal assistant running as a daemon")).toBe(true);
 			expect(customPrompt.startsWith("You are Exact.\n\n<cwd>")).toBe(true);
 		});
 
@@ -110,21 +121,6 @@ describe("buildSystemPrompt", () => {
 			expect(prompt).toContain(expected);
 		});
 
-		test("instructs models to resolve pi docs and examples under absolute base paths", () => {
-			const prompt = buildSystemPrompt({
-				contextFiles: [],
-				skills: [],
-				cwd: process.cwd(),
-			});
-
-			expect(prompt).toContain(
-				"- When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory",
-			);
-			expect(prompt).toContain("environment variables (docs/environment-variables.md), MCP servers (docs/mcp.md)");
-			expect(prompt).toContain(
-				"Before implementing harness changes, read the relevant docs and examples in full, following related cross-references.",
-			);
-		});
 	});
 
 	describe("custom tool snippets", () => {

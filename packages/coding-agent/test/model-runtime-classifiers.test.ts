@@ -41,7 +41,7 @@ describe("ModelRuntime classifiers", () => {
 		});
 	}
 
-	/** Classifies one image and returns the request body and headers the service received. */
+	/** Classifies one image and returns the request the service received. */
 	async function captureImageRequest(runtime: ModelRuntime, provider: string, id: string) {
 		await runtime.setRuntimeApiKey(provider, "secret");
 		const model = runtime.getModelOfType("classifier", provider, id)!;
@@ -56,7 +56,7 @@ describe("ModelRuntime classifiers", () => {
 						body: JSON.parse(String(init?.body)) as Record<string, unknown>,
 						headers: new Headers(init?.headers),
 					});
-					return Response.json({ answers: { approved: { type: "noul", noul: 0.8 } } });
+					return Response.json({ answers: [{ name: "approved", type: "predicate", probability: 0.8 }] });
 				},
 			},
 		);
@@ -65,58 +65,52 @@ describe("ModelRuntime classifiers", () => {
 		return requests[0]!;
 	}
 
-	it("lists Jev separately and classifies with runtime-resolved auth", async () => {
+	it("lists classifiers separately and classifies with runtime-resolved auth", async () => {
 		const runtime = await createRuntime();
-		const jev = runtime.getModelOfType("classifier", "typesafe", "jev-latest")!;
-		expect(jev.type).toBe("classifier");
-		expect(runtime.getModel("typesafe", "jev-latest")).toBeUndefined();
+		const classifier = runtime.getModelOfType("classifier", "openai", "gpt-6-luna")!;
+		expect(classifier.type).toBe("classifier");
+		expect(runtime.getModels("openai").every((model) => model.type === "chat")).toBe(true);
 
-		const unconfigured = await runtime.classify(jev, context);
+		const unconfigured = await runtime.classify(classifier, context);
 		expect(unconfigured.stopReason).toBe("error");
 		expect(unconfigured.errorMessage).toContain("not configured");
 
-		await runtime.setRuntimeApiKey("typesafe", "sk-typesafe");
-		expect(await runtime.getAvailableOfType("classifier", "typesafe")).toEqual([jev]);
+		await runtime.setRuntimeApiKey("openai", "sk-openai");
+		expect(await runtime.getAvailableOfType("classifier", "openai")).toEqual([classifier]);
 		const fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
-			expect(new Headers(init?.headers).get("authorization")).toBe("Bearer sk-typesafe");
-			return Response.json({ answers: { approved: { type: "noul", noul: 0.8 } } });
+			expect(new Headers(init?.headers).get("authorization")).toBe("Bearer sk-openai");
+			return Response.json({ answers: [{ name: "approved", type: "predicate", probability: 0.8 }] });
 		});
-		const result = await runtime.classify(jev, context, { fetch });
+		const result = await runtime.classify(classifier, context, { fetch });
 		expect(result.answers.approved).toEqual({ type: "bool", probability: 0.8 });
 	});
 
-	it("keeps OpenRouter's image form when models.json routes OpenRouter through a proxy", async () => {
-		const runtime = await createRuntime({ providers: { openrouter: { baseUrl: "https://proxy.example.com/v1" } } });
+	it("sends images as input_image parts alongside the JSON state", async () => {
+		const runtime = await createRuntime();
 
-		const request = await captureImageRequest(runtime, "openrouter", "typesafe/jev-1.14");
+		const request = await captureImageRequest(runtime, "openai", "gpt-6-luna");
 
-		// OpenRouter answers TypeSafe `assets` with 200 but drops the images.
-		expect(request.url).toBe("https://proxy.example.com/v1/systemone");
-		expect(request.body.state).toEqual([
-			{ type: "image_url", image_url: { url: "data:image/png;base64,cG5n" } },
-			context.state,
+		expect(request.url).toBe("https://api.openai.com/v1/decisions");
+		expect(request.body.input).toEqual([
+			{
+				role: "user",
+				content: [
+					{ type: "input_text", text: JSON.stringify(context.state) },
+					{ type: "input_image", image_url: "data:image/png;base64,cG5n" },
+				],
+			},
 		]);
-		expect(request.body).not.toHaveProperty("assets");
-		expect(request.headers.has("typesafe-danger-zone-images")).toBe(false);
+		expect(request.headers.get("authorization")).toBe("Bearer secret");
 	});
 
-	it("applies provider compat from models.json to classifier models", async () => {
+	it("applies a models.json baseUrl to classifier models", async () => {
 		const runtime = await createRuntime({
-			providers: {
-				typesafe: {
-					baseUrl: "https://proxy.example.com/v1",
-					compat: { imageInput: "state-image-urls", sendImageOptInHeader: false },
-				},
-			},
+			providers: { openai: { baseUrl: "https://proxy.example.com/v1" } },
 		});
 
-		const request = await captureImageRequest(runtime, "typesafe", "jev-latest");
+		const request = await captureImageRequest(runtime, "openai", "gpt-6-luna");
 
-		expect(request.url).toBe("https://proxy.example.com/v1/systemone");
-		expect(request.body.state).toEqual([
-			{ type: "image_url", image_url: { url: "data:image/png;base64,cG5n" } },
-			context.state,
-		]);
-		expect(request.headers.has("typesafe-danger-zone-images")).toBe(false);
+		expect(request.url).toBe("https://proxy.example.com/v1/decisions");
+		expect(request.body.model).toBe("gpt-6-luna");
 	});
 });

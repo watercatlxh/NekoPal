@@ -684,15 +684,6 @@ describe("default model selection", () => {
 		expect(defaultModelPerProvider["openai-codex"]).toBe("gpt-6.2-sol");
 	});
 
-	test("zai, minimax, cerebras, and ant-ling defaults track current models", () => {
-		expect(defaultModelPerProvider.zai).toBe("glm-5.3");
-		expect(defaultModelPerProvider["zai-coding-cn"]).toBe("glm-5.3");
-		expect(defaultModelPerProvider.minimax).toBe("MiniMax-M3");
-		expect(defaultModelPerProvider["minimax-cn"]).toBe("MiniMax-M3");
-		expect(defaultModelPerProvider.cerebras).toBe("gpt-oss-120b");
-		expect(defaultModelPerProvider["ant-ling"]).toBe("Ring-2.6-1T");
-	});
-
 	test("built-in chat providers have defaults in their generated catalogs", () => {
 		for (const provider of getBuiltinProviders()) {
 			const chatModels = getBuiltinModels(provider);
@@ -708,10 +699,6 @@ describe("default model selection", () => {
 		}
 	});
 
-	test("ai-gateway default tracks current model", () => {
-		expect(defaultModelPerProvider["vercel-ai-gateway"]).toBe("zai/glm-5.3");
-	});
-
 	test("anthropic default tracks current model", () => {
 		expect(defaultModelPerProvider.anthropic).toBe("claude-opus-5-5");
 	});
@@ -720,27 +707,22 @@ describe("default model selection", () => {
 		expect(defaultModelPerProvider.xai).toBe("grok-4.7");
 	});
 
-	test("qwen token plan individual default tracks current model", () => {
-		expect(defaultModelPerProvider["qwen-token-plan-individual"]).toBe("qwen3.8-max");
-		expect(defaultModelPerProvider["qwen-token-plan-individual-cn"]).toBe("qwen3.8-max");
-	});
-
-	test("findInitialModel selects ai-gateway default when available", async () => {
-		const aiGatewayModel: Model<"anthropic-messages"> = {
-			id: "anthropic/claude-opus-4-6",
-			name: "Claude Opus 4.6",
-			api: "anthropic-messages",
-			provider: "vercel-ai-gateway",
-			baseUrl: "https://ai-gateway.vercel.sh",
+	test("findInitialModel selects the provider default when available", async () => {
+		const xaiModel: Model<"openai-responses"> = {
+			id: "grok-4.7",
+			name: "Grok 4.7",
+			api: "openai-responses",
+			provider: "xai",
+			baseUrl: "https://api.x.ai/v1",
 			reasoning: true,
-			input: ["text", "image"],
-			cost: { input: 5, output: 15, cacheRead: 0.5, cacheWrite: 5 },
-			contextWindow: 200000,
+			input: ["text"],
+			cost: { input: 3, output: 15, cacheRead: 0.75, cacheWrite: 0 },
+			contextWindow: 256000,
 			maxTokens: 8192,
 		};
 
 		const registry = {
-			getAvailableSnapshot: () => [aiGatewayModel],
+			getAvailableSnapshot: () => [xaiModel],
 		} as unknown as Parameters<typeof findInitialModel>[0]["modelRuntime"];
 
 		const result = await findInitialModel({
@@ -749,8 +731,8 @@ describe("default model selection", () => {
 			modelRuntime: registry,
 		});
 
-		expect(result.model?.provider).toBe("vercel-ai-gateway");
-		expect(result.model?.id).toBe("anthropic/claude-opus-4-6");
+		expect(result.model?.provider).toBe("xai");
+		expect(result.model?.id).toBe("grok-4.7");
 	});
 
 	test("findInitialModel ignores an unauthenticated saved default", async () => {

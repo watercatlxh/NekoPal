@@ -205,6 +205,7 @@ export {
 	defineTool,
 	discoverAndLoadExtensions,
 	ExtensionRunner,
+	noOpUIContext,
 	isBashToolResult,
 	isEditToolResult,
 	isFindToolResult,
@@ -224,9 +225,13 @@ export { convertToLlm } from "./core/messages.ts";
 export { ModelRegistry } from "./core/model-registry.ts";
 export {
 	type ModelScopeDiagnostic,
+	findExactModelReferenceMatch,
+	type ModelReferenceResult,
+	type ModelReferenceRequest,
 	type ResolveCliModelResult,
 	type ResolveModelScopeResult,
 	resolveCliModel,
+	resolveModelReference,
 	resolveModelScopeWithDiagnostics,
 	type ScopedModel,
 } from "./core/model-resolver.ts";
@@ -310,6 +315,8 @@ export {
 	type ThinkingLevelChangeEntry,
 } from "./core/session-manager.ts";
 export { type NekoPalSettings, NekoPalSettingsSchema, NEKOPAL_DEFAULTS } from "./core/nekopal-settings.ts";
+export { SettingsSchema } from "./core/settings-schema.ts";
+export { resolveConfigValue, resolveConfigValueOrThrow } from "./core/resolve-config-value.ts";
 export {
 	type CacheWarmingMode,
 	type CompactionModelOverride,

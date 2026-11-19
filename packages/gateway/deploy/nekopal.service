@@ -1,0 +1,19 @@
+[Unit]
+Description=NekoPal personal assistant daemon
+Documentation=https://github.com/watercatlxh/nekopal
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env node %h/nekopal/packages/gateway/dist/main.js
+EnvironmentFile=%h/.nekopal/env
+Restart=on-failure
+RestartSec=5
+# The daemon writes only inside its data directory and the workspace it was configured with.
+WorkingDirectory=%h
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

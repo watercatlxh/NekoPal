@@ -43,11 +43,7 @@ async function testTokensOnAbort<TApi extends Api>(llm: Model<TApi>, options: St
 
 	// OpenAI providers only send usage in the final chunk, so when aborted they have no token stats.
 	// Anthropic sends usage information early in the stream.
-	if (
-		llm.api === "openai-completions" ||
-		llm.api === "openai-responses" ||
-		llm.api === "openai-codex-responses"
-	) {
+	if (llm.api === "openai-completions" || llm.api === "openai-responses" || llm.api === "openai-codex-responses") {
 		expect(msg.usage.input).toBe(0);
 		expect(msg.usage.output).toBe(0);
 	} else {

@@ -1,6 +1,6 @@
 import { Type } from "typebox";
 import { describe, expect, test } from "vitest";
-import { getModel, streamSimple } from "../src/compat.ts";
+import { streamSimple } from "../src/compat.ts";
 import type { Api, AssistantMessage, Context, Message, Model, SystemMessage, Tool } from "../src/types.ts";
 import { resolveTranscriptTools } from "../src/utils/transcript.ts";
 
@@ -566,6 +566,29 @@ describe("transcript system messages", () => {
 		);
 	});
 
+	// Kimi Coding serves these over Chat Completions. K3-style models accept tools declared in
+	// later system messages; kimi-for-coding-highspeed rejects tool-bearing system messages.
+	function kimiCodingModel(id: string, k3Style = true): Model<"openai-completions"> {
+		return {
+			...modelBase,
+			id,
+			name: id,
+			api: "openai-completions",
+			provider: "kimi-coding",
+			compat: {
+				supportsStore: false,
+				supportsDeveloperRole: false,
+				supportsReasoningEffort: k3Style,
+				maxTokensField: "max_tokens",
+				supportsStrictMode: false,
+				thinkingFormat: k3Style ? "openai" : "deepseek",
+				...(k3Style ? { requiresReasoningContentOnAssistantMessages: true } : {}),
+				supportsMidConvoSystemMessages: true,
+				...(k3Style ? { supportsMidConvoToolAdditions: true } : {}),
+			},
+		};
+	}
+
 	type KimiPayload = {
 		tools?: Array<{ function?: { name: string } }>;
 		messages: Array<{ role: string; tools?: Array<{ function?: { name: string } }> }>;
@@ -573,7 +596,7 @@ describe("transcript system messages", () => {
 
 	// #10940: Kimi tool messages cannot remove tools, so a removal rewrites the prefix once.
 	test("keeps the Kimi prefix across loads after a removal", async () => {
-		const [beforeRemoval, ...afterRemoval] = await captureToolHistory<KimiPayload>(getModel("kimi-coding", "k3"));
+		const [beforeRemoval, ...afterRemoval] = await captureToolHistory<KimiPayload>(kimiCodingModel("k3"));
 
 		expect(beforeRemoval?.tools?.map((value) => value.function?.name)).toEqual(["base_tool", "drop_tool"]);
 		for (const payload of afterRemoval) {
@@ -590,7 +613,7 @@ describe("transcript system messages", () => {
 
 	// #10720: Kimi Coding uses Chat Completions so K3-style models keep added tools out of the top-level list.
 	test.each(["k3", "k3-256k", "kimi-for-coding"] as const)("anchors additions for Kimi Coding %s", async (modelId) => {
-		const payload = await capturePayload<KimiPayload>(getModel("kimi-coding", modelId), additionContext);
+		const payload = await capturePayload<KimiPayload>(kimiCodingModel(modelId), additionContext);
 
 		expect(payload.tools?.map((value) => value.function?.name)).toEqual(["base_tool"]);
 		expect(payload.messages.find((message) => message.tools)?.tools?.map((value) => value.function?.name)).toEqual([
@@ -601,7 +624,7 @@ describe("transcript system messages", () => {
 	// #10720: Kimi Code Highspeed rejects tool-bearing system messages.
 	test("keeps Kimi Coding Highspeed additions in top-level tools", async () => {
 		const payload = await capturePayload<KimiPayload>(
-			getModel("kimi-coding", "kimi-for-coding-highspeed"),
+			kimiCodingModel("kimi-for-coding-highspeed", false),
 			additionContext,
 		);
 

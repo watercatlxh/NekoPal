@@ -327,7 +327,8 @@ export async function emitProjectTrustEvent(
 	return { errors };
 }
 
-const noOpUIContext: ExtensionUIContext = {
+/** UI context for hosts without a terminal: dialogs resolve to their "cancelled" value. */
+export const noOpUIContext: ExtensionUIContext = {
 	select: async () => undefined,
 	confirm: async () => false,
 	input: async () => undefined,

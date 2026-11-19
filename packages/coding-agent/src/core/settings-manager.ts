@@ -372,8 +372,8 @@ export class SettingsManager {
 		const resolvedAgentDir = resolvePath(agentDir);
 		const storage = new FileSettingsStorage(resolvedCwd, resolvedAgentDir);
 		return SettingsManager.fromStorageWithPaths(storage, options, {
-			global: join(resolvedAgentDir, "settings.json"),
-			project: join(resolvedCwd, CONFIG_DIR_NAME, "settings.json"),
+			global: join(resolvedAgentDir, "settings.toml"),
+			project: join(resolvedCwd, CONFIG_DIR_NAME, "settings.toml"),
 		});
 	}
 

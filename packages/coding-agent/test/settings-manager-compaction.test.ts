@@ -1,3 +1,4 @@
+import { stringify as stringifyToml } from "smol-toml";
 import { describe, expect, it } from "vitest";
 import { InMemorySettingsStorage, SettingsManager } from "../src/core/settings-manager.ts";
 
@@ -65,7 +66,7 @@ describe("compaction model overrides", () => {
 	it("merges project model overrides per field before resolving fallbacks", async () => {
 		const storage = new InMemorySettingsStorage();
 		storage.withLock("global", () =>
-			JSON.stringify({
+			stringifyToml({
 				compaction: {
 					reserveTokens: 8192,
 					modelOverrides: {
@@ -76,7 +77,7 @@ describe("compaction model overrides", () => {
 			}),
 		);
 		storage.withLock("project", () =>
-			JSON.stringify({
+			stringifyToml({
 				compaction: { reserveTokens: 1024, modelOverrides: { [modelKey]: { keepRecentTokens: 2000 } } },
 			}),
 		);
@@ -100,7 +101,7 @@ describe("compaction model overrides", () => {
 	it("keeps enabled global and preserves overrides when saving the toggle", async () => {
 		const storage = new InMemorySettingsStorage();
 		storage.withLock("global", () =>
-			JSON.stringify({
+			stringifyToml({
 				compaction: { modelOverrides: { [modelKey]: { enabled: false, reserveTokens: 400000 } } },
 			}),
 		);
@@ -113,12 +114,12 @@ describe("compaction model overrides", () => {
 	});
 
 	describe.each(["reserveTokens", "keepRecentTokens"] as const)("model override %s", (field) => {
-		it.each([null, -1, 1.5, "400000", true, {}, [], Number.MAX_SAFE_INTEGER + 1])(
+		it.each([-1, 1.5, "400000", true, {}, []])(
 			"reports invalid token values: %j",
 			(value) => {
 				const storage = new InMemorySettingsStorage();
 				storage.withLock("global", () =>
-					JSON.stringify({
+					stringifyToml({
 						compaction: { modelOverrides: { [modelKey]: { [field]: value } } },
 					}),
 				);
@@ -128,6 +129,17 @@ describe("compaction model overrides", () => {
 				);
 				expect(manager.getCompactionSettings()).toEqual(defaults);
 				expect(manager.getCompactionSettings({ provider: "other", id: model.id })).toEqual(defaults);
+			},
+		);
+
+		it.each([null, Number.MAX_SAFE_INTEGER + 1])(
+			"reports invalid in-memory token values TOML cannot store: %j",
+			(value) => {
+				const manager = SettingsManager.inMemory();
+				manager.applyOverrides({ compaction: { modelOverrides: { [modelKey]: { [field]: value } } } });
+				expect(() => manager.getCompactionSettings(model)).toThrow(
+					`Invalid compaction.modelOverrides["${modelKey}"].${field} setting: ${String(value)}. Expected a non-negative safe integer.`,
+				);
 			},
 		);
 
@@ -141,12 +153,12 @@ describe("compaction model overrides", () => {
 	});
 
 	describe.each(["reserveTokens", "keepRecentTokens"] as const)("ordinary compaction.%s", (field) => {
-		it.each([null, -1, 1.5, "400000", true, {}, [], Number.MAX_SAFE_INTEGER + 1])(
+		it.each([-1, 1.5, "400000", true, {}, []])(
 			"reports invalid values even when a valid model override exists: %j",
 			(value) => {
 				const storage = new InMemorySettingsStorage();
 				storage.withLock("global", () =>
-					JSON.stringify({
+					stringifyToml({
 						compaction: {
 							[field]: value,
 							modelOverrides: { [modelKey]: { [field]: 4096 } },
@@ -160,6 +172,17 @@ describe("compaction model overrides", () => {
 			},
 		);
 
+		it.each([null, Number.MAX_SAFE_INTEGER + 1])(
+			"reports invalid in-memory values TOML cannot store: %j",
+			(value) => {
+				const manager = SettingsManager.inMemory();
+				manager.applyOverrides({ compaction: { [field]: value } });
+				expect(() => manager.getCompactionSettings()).toThrow(
+					`Invalid compaction.${field} setting: ${String(value)}`,
+				);
+			},
+		);
+
 		it.each([Number.NaN, Infinity, -Infinity])("reports non-finite runtime values: %s", (value) => {
 			const manager = SettingsManager.inMemory();
 			manager.applyOverrides({ compaction: { [field]: value } });
@@ -167,11 +190,19 @@ describe("compaction model overrides", () => {
 		});
 	});
 
-	it.each([null, false, 42, "invalid", []])("reports malformed model entries: %j", (entry) => {
+	it.each([false, 42, "invalid", []])("reports malformed model entries: %j", (entry) => {
 		const storage = new InMemorySettingsStorage();
-		storage.withLock("global", () => JSON.stringify({ compaction: { modelOverrides: { [modelKey]: entry } } }));
+		storage.withLock("global", () => stringifyToml({ compaction: { modelOverrides: { [modelKey]: entry } } }));
 		expect(() => SettingsManager.fromStorage(storage).getCompactionSettings(model)).toThrow(
 			`Invalid compaction.modelOverrides["${modelKey}"] setting: ${String(entry)}. Expected an object.`,
+		);
+	});
+
+	it("reports a null model entry, which TOML cannot store", () => {
+		const manager = SettingsManager.inMemory();
+		manager.applyOverrides({ compaction: { modelOverrides: { [modelKey]: null } } });
+		expect(() => manager.getCompactionSettings(model)).toThrow(
+			`Invalid compaction.modelOverrides["${modelKey}"] setting: null. Expected an object.`,
 		);
 	});
 

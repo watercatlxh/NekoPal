@@ -29,20 +29,17 @@ describe("issue #8337 UTF-8 BOM parsing", () => {
 
 		const agentDir = join(testDir, "agent");
 		const projectDir = join(testDir, "project");
-		mkdirSync(join(projectDir, ".pi"), { recursive: true });
+		mkdirSync(join(projectDir, ".nekopal"), { recursive: true });
 		mkdirSync(agentDir, { recursive: true });
-		const globalSettingsPath = join(agentDir, "settings.json");
-		writeFileSync(globalSettingsPath, `\uFEFF${JSON.stringify({ defaultModel: "global-model" })}`);
-		writeFileSync(
-			join(projectDir, ".pi", "settings.json"),
-			`\uFEFF${JSON.stringify({ defaultProvider: "project-provider" })}`,
-		);
+		const globalSettingsPath = join(agentDir, "settings.toml");
+		writeFileSync(globalSettingsPath, `\uFEFFdefaultModel = "global-model"\n`);
+		writeFileSync(join(projectDir, ".nekopal", "settings.toml"), `\uFEFFdefaultProvider = "project-provider"\n`);
 
 		const settings = SettingsManager.create(projectDir, agentDir);
 		expect(settings.getDefaultModel()).toBe("global-model");
 		expect(settings.getDefaultProvider()).toBe("project-provider");
 
-		settings.setTheme("dark");
+		settings.setDefaultThinkingLevel("high");
 		await settings.flush();
 		expect(readFileSync(globalSettingsPath, "utf-8")).not.toMatch(/^\uFEFF/);
 	});

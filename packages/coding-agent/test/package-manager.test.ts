@@ -76,8 +76,8 @@ describe("DefaultPackageManager", () => {
 	let previousOfflineEnv: string | undefined;
 
 	beforeEach(() => {
-		previousOfflineEnv = process.env.PI_OFFLINE;
-		delete process.env.PI_OFFLINE;
+		previousOfflineEnv = process.env.NEKOPAL_OFFLINE;
+		delete process.env.NEKOPAL_OFFLINE;
 		tempDir = join(tmpdir(), `pm-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(tempDir, { recursive: true });
 		agentDir = join(tempDir, "agent");
@@ -93,9 +93,9 @@ describe("DefaultPackageManager", () => {
 
 	afterEach(() => {
 		if (previousOfflineEnv === undefined) {
-			delete process.env.PI_OFFLINE;
+			delete process.env.NEKOPAL_OFFLINE;
 		} else {
-			process.env.PI_OFFLINE = previousOfflineEnv;
+			process.env.NEKOPAL_OFFLINE = previousOfflineEnv;
 		}
 		vi.restoreAllMocks();
 		vi.unstubAllGlobals();
@@ -108,7 +108,6 @@ describe("DefaultPackageManager", () => {
 			const result = await packageManager.resolve();
 			expect(result.extensions).toEqual([]);
 			expect(result.prompts).toEqual([]);
-			expect(result.themes).toEqual([]);
 			expect(result.skills.every((r) => r.metadata.source === "auto" && r.metadata.origin === "top-level")).toBe(
 				true,
 			);
@@ -191,7 +190,7 @@ Content`,
 		});
 
 		it("should resolve project paths relative to .pi", async () => {
-			const extDir = join(tempDir, ".pi", "extensions");
+			const extDir = join(tempDir, ".nekopal", "extensions");
 			mkdirSync(extDir, { recursive: true });
 			const extPath = join(extDir, "project-ext.ts");
 			writeFileSync(extPath, "export default function() {}");
@@ -223,11 +222,9 @@ Content`,
 				const sharedExtensionsDir = join(sharedDir, "extensions");
 				const sharedSkillsDir = join(sharedDir, "skills");
 				const sharedPromptsDir = join(sharedDir, "prompts");
-				const sharedThemesDir = join(sharedDir, "themes");
 				mkdirSync(sharedExtensionsDir, { recursive: true });
 				mkdirSync(sharedSkillsDir, { recursive: true });
 				mkdirSync(sharedPromptsDir, { recursive: true });
-				mkdirSync(sharedThemesDir, { recursive: true });
 
 				writeFileSync(join(sharedExtensionsDir, "shared.ts"), "export default function() {}");
 				mkdirSync(join(sharedSkillsDir, "shared-skill"), { recursive: true });
@@ -240,18 +237,15 @@ description: Shared skill
 Content`,
 				);
 				writeFileSync(join(sharedPromptsDir, "shared.md"), "Shared prompt");
-				writeFileSync(join(sharedThemesDir, "shared.json"), JSON.stringify({ name: "shared-theme" }));
 
 				mkdirSync(join(agentDir), { recursive: true });
-				mkdirSync(join(tempDir, ".pi"), { recursive: true });
+				mkdirSync(join(tempDir, ".nekopal"), { recursive: true });
 				symlinkSync(sharedExtensionsDir, join(agentDir, "extensions"), "dir");
 				symlinkSync(sharedSkillsDir, join(agentDir, "skills"), "dir");
 				symlinkSync(sharedPromptsDir, join(agentDir, "prompts"), "dir");
-				symlinkSync(sharedThemesDir, join(agentDir, "themes"), "dir");
-				symlinkSync(sharedExtensionsDir, join(tempDir, ".pi", "extensions"), "dir");
-				symlinkSync(sharedSkillsDir, join(tempDir, ".pi", "skills"), "dir");
-				symlinkSync(sharedPromptsDir, join(tempDir, ".pi", "prompts"), "dir");
-				symlinkSync(sharedThemesDir, join(tempDir, ".pi", "themes"), "dir");
+				symlinkSync(sharedExtensionsDir, join(tempDir, ".nekopal", "extensions"), "dir");
+				symlinkSync(sharedSkillsDir, join(tempDir, ".nekopal", "skills"), "dir");
+				symlinkSync(sharedPromptsDir, join(tempDir, ".nekopal", "prompts"), "dir");
 
 				const result = await packageManager.resolve();
 
@@ -259,12 +253,10 @@ Content`,
 					extensions: result.extensions.length,
 					skills: result.skills.length,
 					prompts: result.prompts.length,
-					themes: result.themes.length,
 				}).toEqual({
 					extensions: 1,
 					skills: 1,
 					prompts: 1,
-					themes: 1,
 				});
 
 				// Project auto-discovered has higher precedence than user auto-discovered,
@@ -272,7 +264,6 @@ Content`,
 				expect(result.extensions[0].metadata.scope).toBe("project");
 				expect(result.skills[0].metadata.scope).toBe("project");
 				expect(result.prompts[0].metadata.scope).toBe("project");
-				expect(result.themes[0].metadata.scope).toBe("project");
 			} finally {
 				if (previousHome === undefined) {
 					delete process.env.HOME;
@@ -283,7 +274,7 @@ Content`,
 		});
 
 		it("should auto-discover project prompts with overrides", async () => {
-			const promptsDir = join(tempDir, ".pi", "prompts");
+			const promptsDir = join(tempDir, ".nekopal", "prompts");
 			mkdirSync(promptsDir, { recursive: true });
 			const promptPath = join(promptsDir, "is.md");
 			writeFileSync(promptPath, "Is prompt");
@@ -344,7 +335,7 @@ Content`,
 		});
 
 		it("should use the project .pi dir as baseDir for project .pi skills", async () => {
-			const projectBaseDir = join(tempDir, ".pi");
+			const projectBaseDir = join(tempDir, ".nekopal");
 			const skillPath = join(projectBaseDir, "skills", "project-pi", "SKILL.md");
 			mkdirSync(join(projectBaseDir, "skills", "project-pi"), { recursive: true });
 			writeFileSync(skillPath, "---\nname: project-pi\ndescription: project pi\n---\n");
@@ -506,7 +497,7 @@ Content`,
 
 			try {
 				const cwd = join(tempDir, "scratch", "nested");
-				const localAgentDir = join(tempDir, ".pi", "agent");
+				const localAgentDir = join(tempDir, ".nekopal", "agent");
 				const localSettingsManager = SettingsManager.inMemory();
 				mkdirSync(cwd, { recursive: true });
 				mkdirSync(localAgentDir, { recursive: true });
@@ -590,7 +581,7 @@ Content`,
 		it("should not apply parent .gitignore to .pi auto-discovery", async () => {
 			writeFileSync(join(tempDir, ".gitignore"), ".pi\n");
 
-			const skillDir = join(tempDir, ".pi", "skills", "auto-skill");
+			const skillDir = join(tempDir, ".nekopal", "skills", "auto-skill");
 			mkdirSync(skillDir, { recursive: true });
 			const skillPath = join(skillDir, "SKILL.md");
 			writeFileSync(skillPath, "---\nname: auto-skill\ndescription: Auto\n---\nContent");
@@ -761,13 +752,10 @@ Content`,
 		it("should handle directories with auto-discovery layout", async () => {
 			const pkgDir = join(tempDir, "auto-pkg");
 			mkdirSync(join(pkgDir, "extensions"), { recursive: true });
-			mkdirSync(join(pkgDir, "themes"), { recursive: true });
 			writeFileSync(join(pkgDir, "extensions", "main.ts"), "export default function() {}");
-			writeFileSync(join(pkgDir, "themes", "dark.json"), "{}");
 
 			const result = await packageManager.resolveExtensionSources([pkgDir]);
 			expect(result.extensions.some((r) => pathEndsWith(r.path, "main.ts") && r.enabled)).toBe(true);
-			expect(result.themes.some((r) => pathEndsWith(r.path, "dark.json") && r.enabled)).toBe(true);
 		});
 
 		it("should stop recursing when a package skill directory contains SKILL.md", async () => {
@@ -1149,7 +1137,7 @@ Content`,
 
 		it("should update git package dependencies without auto-installing peers", async () => {
 			const source = "git:github.com/user/repo";
-			const targetDir = join(tempDir, ".pi", "git", "github.com", "user", "repo");
+			const targetDir = join(tempDir, ".nekopal", "git", "github.com", "user", "repo");
 			mkdirSync(targetDir, { recursive: true });
 			writeFileSync(join(targetDir, "package.json"), JSON.stringify({ name: "repo", version: "1.0.0" }));
 			settingsManager.setProjectPackages([source]);
@@ -1261,7 +1249,7 @@ Content`,
 			});
 
 			const source = "git:github.com/user/repo";
-			const targetDir = join(tempDir, ".pi", "git", "github.com", "user", "repo");
+			const targetDir = join(tempDir, ".nekopal", "git", "github.com", "user", "repo");
 			mkdirSync(targetDir, { recursive: true });
 			writeFileSync(join(targetDir, "package.json"), JSON.stringify({ name: "repo", version: "1.0.0" }));
 			settingsManager.setProjectPackages([source]);
@@ -1598,7 +1586,7 @@ Content`,
 			expect(added).toBe(true);
 
 			const settings = settingsManager.getProjectSettings();
-			const rel = relative(join(tempDir, ".pi"), projectPkgDir);
+			const rel = relative(join(tempDir, ".nekopal"), projectPkgDir);
 			const expected = rel.startsWith(".") ? rel : `./${rel}`;
 			expect(settings.packages?.[0]).toBe(expected);
 		});
@@ -1638,7 +1626,6 @@ Content`,
 					extensions: ["extensions/main.ts"],
 					skills: [],
 					prompts: ["prompts/review.md"],
-					themes: ["themes/dark.json"],
 				},
 			]);
 
@@ -1650,7 +1637,6 @@ Content`,
 					extensions: ["extensions/main.ts"],
 					skills: [],
 					prompts: ["prompts/review.md"],
-					themes: ["themes/dark.json"],
 				},
 			]);
 		});
@@ -1811,21 +1797,6 @@ Content`,
 			const result = await packageManager.resolve();
 			expect(result.extensions.some((r) => isEnabled(r, "keep.ts"))).toBe(true);
 			expect(result.extensions.some((r) => isDisabled(r, "remove.ts"))).toBe(true);
-		});
-
-		it("should filter themes with glob patterns", async () => {
-			const themesDir = join(agentDir, "themes");
-			mkdirSync(themesDir, { recursive: true });
-			writeFileSync(join(themesDir, "dark.json"), "{}");
-			writeFileSync(join(themesDir, "light.json"), "{}");
-			writeFileSync(join(themesDir, "funky.json"), "{}");
-
-			settingsManager.setThemePaths(["themes", "!funky.json"]);
-
-			const result = await packageManager.resolve();
-			expect(result.themes.some((r) => isEnabled(r, "dark.json"))).toBe(true);
-			expect(result.themes.some((r) => isEnabled(r, "light.json"))).toBe(true);
-			expect(result.themes.some((r) => isDisabled(r, "funky.json"))).toBe(true);
 		});
 
 		it("should filter prompts with exclusion pattern", async () => {
@@ -2033,7 +2004,6 @@ Content`,
 					extensions: ["!**/bar.ts"],
 					skills: [],
 					prompts: [],
-					themes: [],
 				},
 			]);
 
@@ -2059,7 +2029,6 @@ Content`,
 					extensions: ["!**/baz.ts"],
 					skills: [],
 					prompts: [],
-					themes: [],
 				},
 			]);
 
@@ -2067,27 +2036,6 @@ Content`,
 			expect(result.extensions.some((r) => isEnabled(r, "foo.ts"))).toBe(true);
 			expect(result.extensions.some((r) => isEnabled(r, "bar.ts"))).toBe(true);
 			expect(result.extensions.some((r) => isDisabled(r, "baz.ts"))).toBe(true);
-		});
-
-		it("should filter themes from package", async () => {
-			const pkgDir = join(tempDir, "theme-pkg");
-			mkdirSync(join(pkgDir, "themes"), { recursive: true });
-			writeFileSync(join(pkgDir, "themes", "nice.json"), "{}");
-			writeFileSync(join(pkgDir, "themes", "ugly.json"), "{}");
-
-			settingsManager.setPackages([
-				{
-					source: pkgDir,
-					extensions: [],
-					skills: [],
-					prompts: [],
-					themes: ["!ugly.json"],
-				},
-			]);
-
-			const result = await packageManager.resolve();
-			expect(result.themes.some((r) => isEnabled(r, "nice.json"))).toBe(true);
-			expect(result.themes.some((r) => isDisabled(r, "ugly.json"))).toBe(true);
 		});
 
 		it("should combine include and exclude patterns", async () => {
@@ -2103,7 +2051,6 @@ Content`,
 					extensions: ["**/alpha.ts", "**/beta.ts", "!**/beta.ts"],
 					skills: [],
 					prompts: [],
-					themes: [],
 				},
 			]);
 
@@ -2125,7 +2072,6 @@ Content`,
 					extensions: ["extensions/one.ts"],
 					skills: [],
 					prompts: [],
-					themes: [],
 				},
 			]);
 
@@ -2169,7 +2115,7 @@ Content`,
 			writeFileSync(join(pkgDir, "extensions", "bar.ts"), "export default function() {}");
 			writeFileSync(join(pkgDir, "skills", "foo", "SKILL.md"), "# Foo\n");
 			settingsManager.setProjectPackages([
-				{ source: relative(join(tempDir, ".pi"), pkgDir), autoload: false, extensions: ["+extensions/foo.ts"] },
+				{ source: relative(join(tempDir, ".nekopal"), pkgDir), autoload: false, extensions: ["+extensions/foo.ts"] },
 			]);
 
 			const result = await packageManager.resolve();
@@ -2209,7 +2155,6 @@ Content`,
 					extensions: ["!**/*.ts", "+extensions/beta.ts"],
 					skills: [],
 					prompts: [],
-					themes: [],
 				},
 			]);
 
@@ -2234,7 +2179,6 @@ Content`,
 					extensions: [],
 					skills: ["!**/*", "+skills/skill-a", "+skills/skill-c"],
 					prompts: [],
-					themes: [],
 				},
 			]);
 
@@ -2280,21 +2224,6 @@ Content`,
 			expect(result.extensions.some((r) => isEnabled(r, "three.ts"))).toBe(true);
 		});
 
-		it("should force-include themes", async () => {
-			const themesDir = join(agentDir, "themes");
-			mkdirSync(themesDir, { recursive: true });
-			writeFileSync(join(themesDir, "dark.json"), "{}");
-			writeFileSync(join(themesDir, "light.json"), "{}");
-			writeFileSync(join(themesDir, "special.json"), "{}");
-
-			settingsManager.setThemePaths(["themes", "!themes/*.json", "+themes/special.json"]);
-
-			const result = await packageManager.resolve();
-			expect(result.themes.some((r) => isDisabled(r, "dark.json"))).toBe(true);
-			expect(result.themes.some((r) => isDisabled(r, "light.json"))).toBe(true);
-			expect(result.themes.some((r) => isEnabled(r, "special.json"))).toBe(true);
-		});
-
 		it("should force-include prompts", async () => {
 			const promptsDir = join(agentDir, "prompts");
 			mkdirSync(promptsDir, { recursive: true });
@@ -2337,7 +2266,6 @@ Content`,
 					extensions: ["extensions/*.ts", "+extensions/alpha.ts", "-extensions/alpha.ts"],
 					skills: [],
 					prompts: [],
-					themes: [],
 				},
 			]);
 
@@ -2677,7 +2605,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 
 	describe("offline mode and network timeouts", () => {
 		it("should update npm range packages using the configured spec", async () => {
-			const installedPath = join(tempDir, ".pi", "npm", "node_modules", "example");
+			const installedPath = join(tempDir, ".nekopal", "npm", "node_modules", "example");
 			mkdirSync(installedPath, { recursive: true });
 			writeFileSync(join(installedPath, "package.json"), JSON.stringify({ name: "example", version: "1.0.0" }));
 			settingsManager.setProjectPackages(["npm:example@^1.0.0"]);
@@ -2711,7 +2639,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 					"install",
 					"example@^1.0.0",
 					"--prefix",
-					realpathSync(join(tempDir, ".pi", "npm")),
+					realpathSync(join(tempDir, ".nekopal", "npm")),
 					"--legacy-peer-deps",
 					"--no-audit",
 					"--no-fund",
@@ -2721,7 +2649,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 		});
 
 		it("should skip project npm update when installed version matches latest", async () => {
-			const installedPath = join(tempDir, ".pi", "npm", "node_modules", "example");
+			const installedPath = join(tempDir, ".nekopal", "npm", "node_modules", "example");
 			mkdirSync(installedPath, { recursive: true });
 			writeFileSync(join(installedPath, "package.json"), JSON.stringify({ name: "example", version: "1.3.1" }));
 			settingsManager.setProjectPackages(["npm:example@^1.0.0"]);
@@ -2748,7 +2676,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 		});
 
 		it("should skip npm updates when the installed version is newer than the registry version", async () => {
-			const installedPath = join(tempDir, ".pi", "npm", "node_modules", "example");
+			const installedPath = join(tempDir, ".nekopal", "npm", "node_modules", "example");
 			mkdirSync(installedPath, { recursive: true });
 			writeFileSync(join(installedPath, "package.json"), JSON.stringify({ name: "example", version: "2.0.0" }));
 			settingsManager.setProjectPackages(["npm:example"]);
@@ -2810,8 +2738,8 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 			const userOldPath = join(agentDir, "npm", "node_modules", "user-old");
 			const userCurrentPath = join(agentDir, "npm", "node_modules", "user-current");
 			const userUnknownPath = join(agentDir, "npm", "node_modules", "user-unknown");
-			const projectOldPath = join(tempDir, ".pi", "npm", "node_modules", "project-old");
-			const projectCurrentPath = join(tempDir, ".pi", "npm", "node_modules", "project-current");
+			const projectOldPath = join(tempDir, ".nekopal", "npm", "node_modules", "project-old");
+			const projectCurrentPath = join(tempDir, ".nekopal", "npm", "node_modules", "project-current");
 			const installPaths = [userOldPath, userCurrentPath, userUnknownPath, projectOldPath, projectCurrentPath];
 			for (const installPath of installPaths) {
 				mkdirSync(installPath, { recursive: true });
@@ -2919,7 +2847,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 					"project-old@latest",
 					"project-missing@latest",
 					"--prefix",
-					realpathSync(join(tempDir, ".pi", "npm")),
+					realpathSync(join(tempDir, ".nekopal", "npm")),
 					"--legacy-peer-deps",
 					"--no-audit",
 					"--no-fund",
@@ -2975,19 +2903,19 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 		});
 
 		it("should skip installing missing package sources when offline", async () => {
-			process.env.PI_OFFLINE = "1";
+			process.env.NEKOPAL_OFFLINE = "1";
 			settingsManager.setProjectPackages(["npm:missing-package", "git:github.com/example/missing-repo"]);
 
 			const installParsedSourceSpy = vi.spyOn(packageManager as any, "installParsedSource");
 
 			const result = await packageManager.resolve();
-			const allResources = [...result.extensions, ...result.skills, ...result.prompts, ...result.themes];
+			const allResources = [...result.extensions, ...result.skills, ...result.prompts];
 			expect(allResources.some((r) => r.metadata.origin === "package")).toBe(false);
 			expect(installParsedSourceSpy).not.toHaveBeenCalled();
 		});
 
 		it("should skip refreshing temporary git sources when offline", async () => {
-			process.env.PI_OFFLINE = "1";
+			process.env.NEKOPAL_OFFLINE = "1";
 			const gitSource = "git:github.com/example/repo";
 			const parsedGitSource = (packageManager as any).parseSource(gitSource);
 			const installedPath = (packageManager as any).getGitInstallPath(parsedGitSource, "temporary") as string;
@@ -3107,8 +3035,8 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 		});
 
 		it("should not run npm view during resolve for installed unpinned packages", async () => {
-			process.env.PI_OFFLINE = "1";
-			const installedPath = join(tempDir, ".pi", "npm", "node_modules", "example");
+			process.env.NEKOPAL_OFFLINE = "1";
+			const installedPath = join(tempDir, ".nekopal", "npm", "node_modules", "example");
 			mkdirSync(join(installedPath, "extensions"), { recursive: true });
 			writeFileSync(join(installedPath, "package.json"), JSON.stringify({ name: "example", version: "1.0.0" }));
 			writeFileSync(join(installedPath, "extensions", "index.ts"), "export default function() {};");
@@ -3122,7 +3050,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 		});
 
 		it("should reinstall pinned npm packages when installed version does not match", async () => {
-			const installedPath = join(tempDir, ".pi", "npm", "node_modules", "example");
+			const installedPath = join(tempDir, ".nekopal", "npm", "node_modules", "example");
 			mkdirSync(installedPath, { recursive: true });
 			writeFileSync(join(installedPath, "package.json"), JSON.stringify({ name: "example", version: "1.0.0" }));
 			settingsManager.setProjectPackages(["npm:example@2.0.0"]);
@@ -3136,7 +3064,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 		});
 
 		it("should not check package updates when offline", async () => {
-			process.env.PI_OFFLINE = "1";
+			process.env.NEKOPAL_OFFLINE = "1";
 			const runCommandCaptureSpy = vi.spyOn(packageManager as any, "runCommandCapture");
 
 			const updates = await packageManager.checkForAvailableUpdates();
@@ -3145,7 +3073,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 		});
 
 		it("should report updates for installed unpinned npm packages", async () => {
-			const installedPath = join(tempDir, ".pi", "npm", "node_modules", "example");
+			const installedPath = join(tempDir, ".nekopal", "npm", "node_modules", "example");
 			mkdirSync(installedPath, { recursive: true });
 			writeFileSync(join(installedPath, "package.json"), JSON.stringify({ name: "example", version: "1.0.0" }));
 			settingsManager.setProjectPackages(["npm:example"]);
@@ -3164,7 +3092,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 		});
 
 		it("should not report npm updates when the installed version is newer than the registry version", async () => {
-			const installedPath = join(tempDir, ".pi", "npm", "node_modules", "example");
+			const installedPath = join(tempDir, ".nekopal", "npm", "node_modules", "example");
 			mkdirSync(installedPath, { recursive: true });
 			writeFileSync(join(installedPath, "package.json"), JSON.stringify({ name: "example", version: "2.0.0" }));
 			settingsManager.setProjectPackages(["npm:example"]);
@@ -3176,7 +3104,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 		});
 
 		it("should skip pinned packages when checking for updates", async () => {
-			const installedNpmPath = join(tempDir, ".pi", "npm", "node_modules", "example");
+			const installedNpmPath = join(tempDir, ".nekopal", "npm", "node_modules", "example");
 			mkdirSync(installedNpmPath, { recursive: true });
 			writeFileSync(join(installedNpmPath, "package.json"), JSON.stringify({ name: "example", version: "1.0.0" }));
 			const parsedGitSource = (packageManager as any).parseSource("git:github.com/example/repo@v1");

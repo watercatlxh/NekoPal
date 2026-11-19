@@ -2,6 +2,7 @@ import { constants as bufferConstants } from "buffer";
 import {
 	appendFileSync,
 	chmodSync,
+	renameSync,
 	closeSync,
 	existsSync,
 	mkdirSync,
@@ -395,7 +396,7 @@ describe("SessionManager.setSessionFile with corrupted files", () => {
 		writeFileSync(noHeaderFile, originalContent);
 
 		expect(() => SessionManager.open(noHeaderFile, tempDir)).toThrow(
-			`Session file is not a valid pi session: ${noHeaderFile}`,
+			`Session file is not a valid nekopal session: ${noHeaderFile}`,
 		);
 		expect(readFileSync(noHeaderFile, "utf-8")).toBe(originalContent);
 	});
@@ -406,7 +407,7 @@ describe("SessionManager.setSessionFile with corrupted files", () => {
 		writeFileSync(nonSessionFile, originalContent);
 
 		expect(() => SessionManager.open(nonSessionFile, tempDir)).toThrow(
-			`Session file is not a valid pi session: ${nonSessionFile}`,
+			`Session file is not a valid nekopal session: ${nonSessionFile}`,
 		);
 		expect(readFileSync(nonSessionFile, "utf-8")).toBe(originalContent);
 	});
@@ -479,12 +480,18 @@ describe("SessionManager session file creation", () => {
 		const firstId = session.appendMessage(userMsg("first question"));
 		const file = session.getSessionFile()!;
 
-		chmodSync(file, 0o444);
-		expect(() => session.appendMessage(assistantMsg("lost answer"))).toThrow();
+		// Turn the session directory into a regular file so appends fail for any user, including root.
+		const savedDir = `${tempDir}-saved`;
+		renameSync(tempDir, savedDir);
+		writeFileSync(tempDir, "");
+		try {
+			expect(() => session.appendMessage(assistantMsg("lost answer"))).toThrow();
+		} finally {
+			rmSync(tempDir, { force: true });
+			renameSync(savedDir, tempDir);
+		}
 		expect(session.getLeafId()).toBe(firstId);
 		expect(session.getEntries().map((entry) => entry.id)).toEqual([firstId]);
-
-		chmodSync(file, 0o644);
 		const secondId = session.appendMessage(assistantMsg("second answer"));
 		expect(session.getEntry(secondId)?.parentId).toBe(firstId);
 
@@ -498,11 +505,14 @@ describe("SessionManager session file creation", () => {
 		const session = SessionManager.create(tempDir, sessionDir);
 		const modelChangeId = session.appendModelChange("anthropic", "claude-sonnet-4-5");
 
-		chmodSync(sessionDir, 0o555);
+		// Replace the directory with a regular file: creating a child fails with ENOTDIR for any user.
+		renameSync(sessionDir, `${sessionDir}-saved`);
+		writeFileSync(sessionDir, "");
 		try {
 			expect(() => session.appendMessage(userMsg("first question"))).toThrow();
 		} finally {
-			chmodSync(sessionDir, 0o755);
+			rmSync(sessionDir, { force: true });
+			renameSync(`${sessionDir}-saved`, sessionDir);
 		}
 		expect(session.getLeafId()).toBe(modelChangeId);
 		expect(session.getEntries().map((entry) => entry.id)).toEqual([modelChangeId]);

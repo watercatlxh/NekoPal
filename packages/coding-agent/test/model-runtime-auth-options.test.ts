@@ -77,26 +77,16 @@ describe("ModelRuntime auth options", () => {
 		expect(options).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
-					type: "api_key",
-					provider: expect.objectContaining({ id: "amazon-bedrock", name: "Amazon Bedrock" }),
-					method: expect.objectContaining({ name: "AWS credentials or bearer token" }),
-				}),
-				expect.objectContaining({
-					type: "api_key",
-					provider: expect.objectContaining({ id: "google-vertex", name: "Google Vertex AI" }),
-					method: expect.objectContaining({ name: "Google Cloud credentials" }),
-				}),
-				expect.objectContaining({
 					type: "oauth",
 					provider: expect.objectContaining({ id: "anthropic", name: "Anthropic" }),
 				}),
 				expect.objectContaining({
-					type: "api_key",
-					provider: expect.objectContaining({ id: "cloudflare-ai-gateway", name: "Cloudflare AI Gateway" }),
+					type: "oauth",
+					provider: expect.objectContaining({ id: "openai", name: "OpenAI" }),
 				}),
 				expect.objectContaining({
-					type: "api_key",
-					provider: expect.objectContaining({ id: "cloudflare-workers-ai", name: "Cloudflare Workers AI" }),
+					type: "oauth",
+					provider: expect.objectContaining({ id: "xai", name: "xAI" }),
 				}),
 			]),
 		);
@@ -132,17 +122,11 @@ describe("ModelRuntime auth options", () => {
 					refresh: "anthropic-refresh",
 					expires: Date.now() + 60 * 60_000,
 				},
-				openrouter: {
+				openai: {
 					type: "oauth",
-					access: "openrouter-key",
+					access: "openai-access",
 					refresh: "",
 					expires: Number.MAX_SAFE_INTEGER,
-				},
-				radius: {
-					type: "oauth",
-					access: "radius-access",
-					refresh: "radius-refresh",
-					expires: Date.now() + 60 * 60_000,
 				},
 			}),
 			modelsPath: null,
@@ -150,10 +134,9 @@ describe("ModelRuntime auth options", () => {
 
 		expect(runtime.isUsingOAuth("anthropic")).toBe(true);
 		expect(runtime.isUsingSubscription("anthropic")).toBe(true);
-		expect(runtime.isUsingOAuth("openrouter")).toBe(true);
-		expect(runtime.isUsingSubscription("openrouter")).toBe(false);
-		expect(runtime.isUsingOAuth("radius")).toBe(true);
-		expect(runtime.isUsingSubscription("radius")).toBe(false);
+		expect(runtime.isUsingOAuth("openai")).toBe(true);
+		expect(runtime.isUsingSubscription("openai")).toBe(true);
+		expect(runtime.isUsingOAuth("xai")).toBe(false);
 	});
 
 	it("constructs an API key method for an extension API-key provider", async () => {

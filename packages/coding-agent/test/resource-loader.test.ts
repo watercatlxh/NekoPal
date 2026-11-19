@@ -37,11 +37,10 @@ describe("DefaultResourceLoader", () => {
 			expect(loader.getExtensions().extensions).toEqual([]);
 			expect(loader.getSkills().skills).toEqual([]);
 			expect(loader.getPrompts().prompts).toEqual([]);
-			expect(loader.getThemes().themes).toEqual([]);
 		});
 
 		it("should not treat a project manifest as the owner of a project extension", async () => {
-			const extensionsDir = join(cwd, ".pi", "extensions");
+			const extensionsDir = join(cwd, ".nekopal", "extensions");
 			mkdirSync(extensionsDir, { recursive: true });
 			writeFileSync(
 				join(cwd, "package.json"),
@@ -103,7 +102,7 @@ describe("DefaultResourceLoader", () => {
 			expect(warnings).toHaveLength(1);
 			expect(warnings[0].path).toBe("npm:broken-package");
 			expect(warnings[0].warning).toMatch(/^failed to install \(.*failed with code 1\)\./);
-			expect(warnings[0].warning).toContain('Run "pi remove npm:broken-package" to remove it from settings.json.');
+			expect(warnings[0].warning).toContain('Run "nekopal remove npm:broken-package" to remove it from settings.toml.');
 		});
 
 		// #11088
@@ -131,11 +130,11 @@ describe("DefaultResourceLoader", () => {
 		it("should point project extension packages at pi remove --local", async () => {
 			vi.stubEnv("PI_OFFLINE", "");
 			writeFileSync(
-				join(agentDir, "settings.json"),
-				JSON.stringify({ npmCommand: [process.execPath, "-e", "process.exit(1)"] }),
+				join(agentDir, "settings.toml"),
+				`npmCommand = ["${process.execPath}", "-e", "process.exit(1)"]\n`,
 			);
-			mkdirSync(join(cwd, ".pi"), { recursive: true });
-			writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({ packages: ["npm:broken-package"] }));
+			mkdirSync(join(cwd, ".nekopal"), { recursive: true });
+			writeFileSync(join(cwd, ".nekopal", "settings.toml"), 'packages = ["npm:broken-package"]\n');
 			const loader = new DefaultResourceLoader({
 				cwd,
 				agentDir,
@@ -146,7 +145,7 @@ describe("DefaultResourceLoader", () => {
 
 			const warnings = loader.getExtensions().warnings ?? [];
 			expect(warnings).toHaveLength(1);
-			expect(warnings[0].warning).toContain('Run "pi remove npm:broken-package --local"');
+			expect(warnings[0].warning).toContain('Run "nekopal remove npm:broken-package --local"');
 		});
 
 		// #11088
@@ -266,7 +265,7 @@ Prompt content.`,
 
 		it("should prefer project resources over user on name collisions", async () => {
 			const userPromptsDir = join(agentDir, "prompts");
-			const projectPromptsDir = join(cwd, ".pi", "prompts");
+			const projectPromptsDir = join(cwd, ".nekopal", "prompts");
 			mkdirSync(userPromptsDir, { recursive: true });
 			mkdirSync(projectPromptsDir, { recursive: true });
 			const userPromptPath = join(userPromptsDir, "commit.md");
@@ -275,7 +274,7 @@ Prompt content.`,
 			writeFileSync(projectPromptPath, "Project prompt");
 
 			const userSkillDir = join(agentDir, "skills", "collision-skill");
-			const projectSkillDir = join(cwd, ".pi", "skills", "collision-skill");
+			const projectSkillDir = join(cwd, ".nekopal", "skills", "collision-skill");
 			mkdirSync(userSkillDir, { recursive: true });
 			mkdirSync(projectSkillDir, { recursive: true });
 			const userSkillPath = join(userSkillDir, "SKILL.md");
@@ -297,20 +296,6 @@ description: project
 Project skill`,
 			);
 
-			const baseTheme = JSON.parse(
-				readFileSync(join(process.cwd(), "src", "modes", "interactive", "theme", "dark.json"), "utf-8"),
-			) as { name: string; vars?: Record<string, string> };
-			baseTheme.name = "collision-theme";
-			const userThemePath = join(agentDir, "themes", "collision.json");
-			const projectThemePath = join(cwd, ".pi", "themes", "collision.json");
-			mkdirSync(join(agentDir, "themes"), { recursive: true });
-			mkdirSync(join(cwd, ".pi", "themes"), { recursive: true });
-			writeFileSync(userThemePath, JSON.stringify(baseTheme, null, 2));
-			if (baseTheme.vars) {
-				baseTheme.vars.accent = "#ff00ff";
-			}
-			writeFileSync(projectThemePath, JSON.stringify(baseTheme, null, 2));
-
 			const loader = new DefaultResourceLoader({ cwd, agentDir });
 			await loader.reload();
 
@@ -319,9 +304,6 @@ Project skill`,
 
 			const skill = loader.getSkills().skills.find((s) => s.name === "collision-skill");
 			expect(skill?.filePath).toBe(projectSkillPath);
-
-			const theme = loader.getThemes().themes.find((t) => t.name === "collision-theme");
-			expect(theme?.sourcePath).toBe(projectThemePath);
 		});
 
 		it("should load symlinked user and project extensions once", async () => {
@@ -338,9 +320,9 @@ Project skill`,
 			);
 
 			mkdirSync(agentDir, { recursive: true });
-			mkdirSync(join(cwd, ".pi"), { recursive: true });
+			mkdirSync(join(cwd, ".nekopal"), { recursive: true });
 			symlinkSync(sharedExtDir, join(agentDir, "extensions"), "dir");
-			symlinkSync(sharedExtDir, join(cwd, ".pi", "extensions"), "dir");
+			symlinkSync(sharedExtDir, join(cwd, ".nekopal", "extensions"), "dir");
 
 			const loader = new DefaultResourceLoader({ cwd, agentDir });
 			await loader.reload();
@@ -351,12 +333,12 @@ Project skill`,
 
 			// mergePaths processes project paths before user paths, so the project
 			// alias is the canonical survivor.
-			expect(extensionsResult.extensions[0].path).toBe(join(cwd, ".pi", "extensions", "shared.ts"));
+			expect(extensionsResult.extensions[0].path).toBe(join(cwd, ".nekopal", "extensions", "shared.ts"));
 		});
 
 		it("should load user extensions before trust and reuse them after trust resolves", async () => {
 			const userExtDir = join(agentDir, "extensions");
-			const projectExtDir = join(cwd, ".pi", "extensions");
+			const projectExtDir = join(cwd, ".nekopal", "extensions");
 			mkdirSync(userExtDir, { recursive: true });
 			mkdirSync(projectExtDir, { recursive: true });
 			const loadCountKey = `__piTrustPreloadCount_${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -395,7 +377,7 @@ export default function(pi) {
 
 			const extensionsResult = loader.getExtensions();
 			expect(extensionsResult.extensions.map((extension) => extension.path)).toEqual([
-				join(cwd, ".pi", "extensions", "project.ts"),
+				join(cwd, ".nekopal", "extensions", "project.ts"),
 				join(userExtDir, "user.ts"),
 			]);
 			expect(globalState[loadCountKey]).toBe(1);
@@ -403,7 +385,7 @@ export default function(pi) {
 
 		it("should keep both extensions loaded when command names collide", async () => {
 			const userExtDir = join(agentDir, "extensions");
-			const projectExtDir = join(cwd, ".pi", "extensions");
+			const projectExtDir = join(cwd, ".nekopal", "extensions");
 			mkdirSync(userExtDir, { recursive: true });
 			mkdirSync(projectExtDir, { recursive: true });
 
@@ -472,7 +454,6 @@ export default function(pi) {
 			settingsManager.setExtensionPaths(["-extensions/disabled.ts"]);
 			settingsManager.setSkillPaths(["-skills/skip-skill"]);
 			settingsManager.setPromptTemplatePaths(["-prompts/skip.md"]);
-			settingsManager.setThemePaths(["-themes/skip.json"]);
 
 			const extensionsDir = join(agentDir, "extensions");
 			mkdirSync(extensionsDir, { recursive: true });
@@ -493,22 +474,16 @@ Content`,
 			mkdirSync(promptsDir, { recursive: true });
 			writeFileSync(join(promptsDir, "skip.md"), "Skip prompt");
 
-			const themesDir = join(agentDir, "themes");
-			mkdirSync(themesDir, { recursive: true });
-			writeFileSync(join(themesDir, "skip.json"), "{}");
-
 			const loader = new DefaultResourceLoader({ cwd, agentDir, settingsManager });
 			await loader.reload();
 
 			const { extensions } = loader.getExtensions();
 			const { skills } = loader.getSkills();
 			const { prompts } = loader.getPrompts();
-			const { themes } = loader.getThemes();
 
 			expect(extensions.some((e) => e.path.endsWith("disabled.ts"))).toBe(false);
 			expect(skills.some((s) => s.name === "skip-skill")).toBe(false);
 			expect(prompts.some((p) => p.name === "skip")).toBe(false);
-			expect(themes.some((t) => t.sourcePath?.endsWith("skip.json"))).toBe(false);
 		});
 
 		it("should discover AGENTS.md context files", async () => {
@@ -571,7 +546,7 @@ Content`,
 		});
 
 		it("should discover SYSTEM.md from cwd/.pi", async () => {
-			const piDir = join(cwd, ".pi");
+			const piDir = join(cwd, ".nekopal");
 			mkdirSync(piDir, { recursive: true });
 			writeFileSync(join(piDir, "SYSTEM.md"), "You are a helpful assistant.");
 
@@ -582,15 +557,13 @@ Content`,
 		});
 
 		it("should skip project resources that require trust when project is not trusted", async () => {
-			const piDir = join(cwd, ".pi");
+			const piDir = join(cwd, ".nekopal");
 			const extensionsDir = join(piDir, "extensions");
 			const skillDir = join(piDir, "skills", "project-skill");
 			const promptsDir = join(piDir, "prompts");
-			const themesDir = join(piDir, "themes");
 			mkdirSync(extensionsDir, { recursive: true });
 			mkdirSync(skillDir, { recursive: true });
 			mkdirSync(promptsDir, { recursive: true });
-			mkdirSync(themesDir, { recursive: true });
 			writeFileSync(join(piDir, "SYSTEM.md"), "Project system prompt.");
 			writeFileSync(join(agentDir, "SYSTEM.md"), "Global system prompt.");
 			writeFileSync(join(agentDir, "AGENTS.md"), "Global instructions");
@@ -605,11 +578,6 @@ description: Project skill
 Project skill content`,
 			);
 			writeFileSync(join(promptsDir, "project.md"), "Project prompt");
-			const themeData = JSON.parse(
-				readFileSync(join(process.cwd(), "src", "modes", "interactive", "theme", "dark.json"), "utf-8"),
-			) as { name: string };
-			themeData.name = "project-theme";
-			writeFileSync(join(themesDir, "project.json"), JSON.stringify(themeData, null, 2));
 			const settingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted: false });
 
 			const loader = new DefaultResourceLoader({ cwd, agentDir, settingsManager });
@@ -624,11 +592,10 @@ Project skill content`,
 			expect(loader.getExtensions().errors).toEqual([]);
 			expect(loader.getSkills().skills.some((skill) => skill.name === "project-skill")).toBe(false);
 			expect(loader.getPrompts().prompts.some((prompt) => prompt.name === "project")).toBe(false);
-			expect(loader.getThemes().themes.some((theme) => theme.name === "project-theme")).toBe(false);
 		});
 
 		it("should discover APPEND_SYSTEM.md", async () => {
-			const piDir = join(cwd, ".pi");
+			const piDir = join(cwd, ".nekopal");
 			mkdirSync(piDir, { recursive: true });
 			writeFileSync(join(piDir, "APPEND_SYSTEM.md"), "Additional instructions.");
 
@@ -641,7 +608,7 @@ Project skill content`,
 
 	describe("system prompt sources", () => {
 		it("exposes discovered project SYSTEM.md as the system prompt source", async () => {
-			const piDir = join(cwd, ".pi");
+			const piDir = join(cwd, ".nekopal");
 			const systemPromptPath = join(piDir, "SYSTEM.md");
 			mkdirSync(piDir, { recursive: true });
 			writeFileSync(systemPromptPath, "Project system prompt.");
@@ -684,7 +651,7 @@ Project skill content`,
 		});
 
 		it("exposes discovered APPEND_SYSTEM.md as an append system prompt source", async () => {
-			const piDir = join(cwd, ".pi");
+			const piDir = join(cwd, ".nekopal");
 			const appendSystemPromptPath = join(piDir, "APPEND_SYSTEM.md");
 			mkdirSync(piDir, { recursive: true });
 			writeFileSync(appendSystemPromptPath, "Project append prompt.");
@@ -826,14 +793,12 @@ Extra content`,
 
 		// Regression: extension discovery used to drop package scope/source, collapsing every
 		// autocomplete source tag to [t]. See issue #6968.
-		it("should keep package metadata for skills, prompts, and themes", async () => {
+		it("should keep package metadata for skills and prompts", async () => {
 			const packageRoot = join(agentDir, "npm", "node_modules", "metadata-pkg");
 			const packageSkillDir = join(packageRoot, "skills", "package-skill");
 			const packagePromptsDir = join(packageRoot, "prompts");
-			const packageThemesDir = join(packageRoot, "themes");
 			mkdirSync(packageSkillDir, { recursive: true });
 			mkdirSync(packagePromptsDir, { recursive: true });
-			mkdirSync(packageThemesDir, { recursive: true });
 			writeFileSync(join(packageRoot, "package.json"), JSON.stringify({ name: "metadata-pkg", version: "1.0.0" }));
 			writeFileSync(
 				join(packageSkillDir, "SKILL.md"),
@@ -850,21 +815,11 @@ description: Package prompt
 ---
 Package prompt content`,
 			);
-			const baseTheme = JSON.parse(
-				readFileSync(join(process.cwd(), "src", "modes", "interactive", "theme", "dark.json"), "utf-8"),
-			) as { name: string };
-			writeFileSync(
-				join(packageThemesDir, "package-theme.json"),
-				JSON.stringify({ ...baseTheme, name: "package-theme" }),
-			);
-
 			const extensionResourceDir = join(tempDir, "extension-resources");
 			const extensionSkillDir = join(extensionResourceDir, "extension-skill");
 			const extensionPromptsDir = join(extensionResourceDir, "prompts");
-			const extensionThemesDir = join(extensionResourceDir, "themes");
 			mkdirSync(extensionSkillDir, { recursive: true });
 			mkdirSync(extensionPromptsDir, { recursive: true });
-			mkdirSync(extensionThemesDir, { recursive: true });
 			writeFileSync(
 				join(extensionSkillDir, "SKILL.md"),
 				`---
@@ -880,11 +835,6 @@ description: Extension prompt
 ---
 Extension prompt content`,
 			);
-			writeFileSync(
-				join(extensionThemesDir, "extension.json"),
-				JSON.stringify({ ...baseTheme, name: "extension-theme" }),
-			);
-
 			const loader = new DefaultResourceLoader({
 				cwd,
 				agentDir,
@@ -900,7 +850,6 @@ Extension prompt content`,
 			loader.extendResources({
 				skillPaths: [{ path: extensionSkillDir, metadata: extensionMetadata }],
 				promptPaths: [{ path: extensionPromptsDir, metadata: extensionMetadata }],
-				themePaths: [{ path: extensionThemesDir, metadata: extensionMetadata }],
 			});
 
 			const packageSourceInfo = { source: "npm:metadata-pkg", scope: "user", origin: "package" };
@@ -910,9 +859,6 @@ Extension prompt content`,
 			expect(
 				loader.getPrompts().prompts.find((prompt) => prompt.name === "package-prompt")?.sourceInfo,
 			).toMatchObject(packageSourceInfo);
-			expect(loader.getThemes().themes.find((theme) => theme.name === "package-theme")?.sourceInfo).toMatchObject(
-				packageSourceInfo,
-			);
 
 			expect(loader.getSkills().skills.find((skill) => skill.name === "extension-skill")?.sourceInfo).toMatchObject(
 				extensionMetadata,
@@ -920,9 +866,6 @@ Extension prompt content`,
 			expect(
 				loader.getPrompts().prompts.find((prompt) => prompt.name === "extension-prompt")?.sourceInfo,
 			).toMatchObject(extensionMetadata);
-			expect(loader.getThemes().themes.find((theme) => theme.name === "extension-theme")?.sourceInfo).toMatchObject(
-				extensionMetadata,
-			);
 		});
 	});
 
@@ -1173,7 +1116,7 @@ export default function(pi: ExtensionAPI) {
 		});
 
 		it("should skip built-in extensions disabled in settings", async () => {
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ extensions: ["-builtin:mcp"] }));
+			writeFileSync(join(agentDir, "settings.toml"), 'extensions = ["-builtin:mcp"]\n');
 			const loaded: string[] = [];
 			const loader = new DefaultResourceLoader({
 				cwd,
@@ -1195,8 +1138,8 @@ export default function(pi: ExtensionAPI) {
 		});
 
 		it("should skip disabledBuiltinExtensions even when settings or -e enable them", async () => {
-			mkdirSync(join(cwd, ".pi"), { recursive: true });
-			writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({ extensions: ["+builtin:mcp"] }));
+			mkdirSync(join(cwd, ".nekopal"), { recursive: true });
+			writeFileSync(join(cwd, ".nekopal", "settings.toml"), 'extensions = ["+builtin:mcp"]\n');
 			const loaded: string[] = [];
 			const loader = new DefaultResourceLoader({
 				cwd,
@@ -1219,9 +1162,9 @@ export default function(pi: ExtensionAPI) {
 			const userExtDir = join(agentDir, "extensions");
 			mkdirSync(userExtDir, { recursive: true });
 			writeFileSync(join(userExtDir, "user.ts"), "export default function() {}");
-			mkdirSync(join(cwd, ".pi"), { recursive: true });
+			mkdirSync(join(cwd, ".nekopal"), { recursive: true });
 			// A project override gives the built-in project scope, which must not move it ahead.
-			writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({ extensions: ["+builtin:mcp"] }));
+			writeFileSync(join(cwd, ".nekopal", "settings.toml"), 'extensions = ["+builtin:mcp"]\n');
 			const loader = new DefaultResourceLoader({
 				cwd,
 				agentDir,
@@ -1257,12 +1200,9 @@ export default function(pi: ExtensionAPI) {
 		});
 
 		it("should apply project built-in extension overrides after trust resolves", async () => {
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ extensions: ["-builtin:mcp"] }));
-			mkdirSync(join(cwd, ".pi"), { recursive: true });
-			writeFileSync(
-				join(cwd, ".pi", "settings.json"),
-				JSON.stringify({ extensions: ["+builtin:mcp", "-builtin:llama"] }),
-			);
+			writeFileSync(join(agentDir, "settings.toml"), 'extensions = ["-builtin:mcp"]\n');
+			mkdirSync(join(cwd, ".nekopal"), { recursive: true });
+			writeFileSync(join(cwd, ".nekopal", "settings.toml"), 'extensions = ["+builtin:mcp", "-builtin:llama"]\n');
 			const loaded: string[] = [];
 			const loader = new DefaultResourceLoader({
 				cwd,

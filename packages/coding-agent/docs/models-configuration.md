@@ -16,7 +16,6 @@ Each key under `providers` is a provider ID. A built-in provider ID changes that
 | `baseUrl` | string |  | API base URL. Also applies to the provider's built-in models. |
 | `apiKey` | string |  | Literal key, "$NAME" environment interpolation, or "!command" output. |
 | `api` | string |  | API for the provider's models, such as "openai-completions", "openai-responses", "anthropic-messages", or "google-generative-ai". |
-| `oauth` | `"radius"` |  | OAuth login flow. Requires baseUrl. |
 | `headers` | object |  | Request headers. Values resolve like apiKey. |
 | `compat` | [object](#compatibility) |  | Provider and model compatibility overrides. |
 | `authHeader` | boolean | `false` | Whether to send the resolved API key as Authorization: Bearer. |
@@ -143,7 +142,7 @@ See [Describe model input and caching](models.md#describe-model-input-and-cachin
 
 ### `openai-responses`
 
-Also applies to `azure-openai-responses` and `openai-codex-responses`.
+Also applies to `openai-codex-responses`.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -178,25 +177,3 @@ Also applies to `azure-openai-responses` and `openai-codex-responses`.
 | `supportsMidConvoToolChanges` | boolean | `false` | Whether the exact model accepts mid-conversation tool_addition and tool_removal blocks. Requires supportsMidConvoSystemMessages. |
 | `supportsMessageThreads` | boolean |  | Whether the endpoint supports Anthropic message threads, which let a request with a session id send only the new messages and continue from the previous reply. Default: true for a baseUrl on api.anthropic.com, false otherwise. Set true for gateways that forward the thread request field. |
 | `allowedFallbackModels` | `object[]` |  | Models Anthropic accepts for server-side refusal fallback, with local pricing metadata for returned fallback responses. When absent or empty, callers must omit fallbacks; Anthropic rejects the field for models with no permitted fallback targets. |
-
-### `bedrock-converse-stream`
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `supportsStrictMode` | boolean | `false` | Whether the model supports Bedrock strict tool schemas. |
-
-### `mistral-conversations`
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `supportsMidConvoSystemMessages` | boolean | `false` | Whether the exact model accepts system messages after the conversation has started. When false, later system messages are folded into the leading system message. |
-| `supportsStrictMode` | boolean | `false` | Whether the model supports strict (schema-constrained) function tools. |
-
-### `typesafe-system-one`
-
-Also applies to `cloudflare-workers-ai-system-one`.
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `imageInput` | `"assets" \| "images" \| "state-image-urls"` |  | How the service takes classifier images. "assets" sends TypeSafe's assets map (PNG and JPEG) and references the images from the state, as TypeSafe and Jev on Workers AI expect. "images" sends Clef's images list of data URLs (PNG, JPEG, and WebP, at most four), as Clef on Workers AI expects. "state-image-urls" places image_url parts before the state, as OpenRouter expects; OpenRouter drops assets without an error. Auto-detected from the provider, baseUrl, and model ID. Classifier models read it from the provider-level compat; models and modelOverrides entries apply to chat models only. |
-| `sendImageOptInHeader` | boolean |  | Whether requests with images send the TypeSafe-Danger-Zone-Images: true header, which TypeSafe's own API requires for its experimental image input. Defaults to true for the typesafe-system-one API unless the model is detected as OpenRouter. |

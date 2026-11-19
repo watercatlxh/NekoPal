@@ -65,7 +65,6 @@ describe("issue #2753 reload stale resource settings", () => {
 						},
 					],
 					noSkills: true,
-					noThemes: true,
 				},
 			});
 			return {
@@ -95,7 +94,7 @@ describe("issue #2753 reload stale resource settings", () => {
 
 		expect(runtime.session.promptTemplates.map((prompt) => prompt.name)).toContain("test");
 
-		writeFileSync(join(agentDir, "settings.json"), `${JSON.stringify({ prompts: ["-prompts/test.md"] }, null, 2)}\n`);
+		writeFileSync(join(agentDir, "settings.toml"), 'prompts = ["-prompts/test.md"]\n');
 
 		await runtime.session.reload();
 

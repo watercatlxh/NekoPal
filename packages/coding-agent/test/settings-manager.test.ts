@@ -1,9 +1,14 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
+import { parse as parseToml } from "smol-toml";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS } from "../src/core/http-dispatcher.ts";
 import { type Settings, SettingsManager } from "../src/core/settings-manager.ts";
+
+function readToml(path: string): Record<string, unknown> {
+	return parseToml(readFileSync(path, "utf-8")) as Record<string, unknown>;
+}
 
 describe("SettingsManager", () => {
 	const testDir = join(process.cwd(), "test-settings-tmp");
@@ -16,7 +21,7 @@ describe("SettingsManager", () => {
 			rmSync(testDir, { recursive: true });
 		}
 		mkdirSync(agentDir, { recursive: true });
-		mkdirSync(join(projectDir, ".pi"), { recursive: true });
+		mkdirSync(join(projectDir, ".nekopal"), { recursive: true });
 	});
 
 	afterEach(() => {
@@ -28,94 +33,76 @@ describe("SettingsManager", () => {
 	describe("preserves externally added settings", () => {
 		it("should preserve enabledModels when changing thinking level", async () => {
 			// Create initial settings file
-			const settingsPath = join(agentDir, "settings.json");
-			writeFileSync(
-				settingsPath,
-				JSON.stringify({
-					theme: "dark",
-					defaultModel: "claude-sonnet",
-				}),
-			);
+			const settingsPath = join(agentDir, "settings.toml");
+			writeFileSync(settingsPath, 'defaultModel = "claude-sonnet"\n');
 
 			// Create SettingsManager (simulates pi starting up)
 			const manager = SettingsManager.create(projectDir, agentDir);
 
-			// Simulate user editing settings.json externally to add enabledModels
-			const currentSettings = JSON.parse(readFileSync(settingsPath, "utf-8"));
-			currentSettings.enabledModels = ["claude-opus-4-5", "gpt-5.2-codex"];
-			writeFileSync(settingsPath, JSON.stringify(currentSettings, null, 2));
+			// Simulate user editing settings.toml externally to add enabledModels
+			writeFileSync(
+				settingsPath,
+				'defaultModel = "claude-sonnet"\nenabledModels = ["claude-opus-4-5", "gpt-5.2-codex"]\n',
+			);
 
 			// User changes thinking level via Shift+Tab
 			manager.setDefaultThinkingLevel("high");
 			await manager.flush();
 
 			// Verify enabledModels is preserved
-			const savedSettings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+			const savedSettings = readToml(settingsPath);
 			expect(savedSettings.enabledModels).toEqual(["claude-opus-4-5", "gpt-5.2-codex"]);
 			expect(savedSettings.defaultThinkingLevel).toBe("high");
-			expect(savedSettings.theme).toBe("dark");
 			expect(savedSettings.defaultModel).toBe("claude-sonnet");
 		});
 
-		it("should preserve custom settings when changing theme", async () => {
-			const settingsPath = join(agentDir, "settings.json");
-			writeFileSync(
-				settingsPath,
-				JSON.stringify({
-					defaultModel: "claude-sonnet",
-				}),
-			);
+		it("should preserve custom settings when changing the default model", async () => {
+			const settingsPath = join(agentDir, "settings.toml");
+			writeFileSync(settingsPath, 'defaultModel = "claude-sonnet"\n');
 
 			const manager = SettingsManager.create(projectDir, agentDir);
 
 			// User adds custom settings externally
-			const currentSettings = JSON.parse(readFileSync(settingsPath, "utf-8"));
-			currentSettings.shellPath = "/bin/zsh";
-			currentSettings.extensions = ["/path/to/extension.ts"];
-			writeFileSync(settingsPath, JSON.stringify(currentSettings, null, 2));
+			writeFileSync(
+				settingsPath,
+				'defaultModel = "claude-sonnet"\nshellPath = "/bin/zsh"\nextensions = ["/path/to/extension.ts"]\n',
+			);
 
-			// User changes theme
-			manager.setTheme("light");
+			// User changes the default model
+			manager.setDefaultModel("claude-opus-4-5");
 			await manager.flush();
 
 			// Verify all settings preserved
-			const savedSettings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+			const savedSettings = readToml(settingsPath);
 			expect(savedSettings.shellPath).toBe("/bin/zsh");
 			expect(savedSettings.extensions).toEqual(["/path/to/extension.ts"]);
-			expect(savedSettings.theme).toBe("light");
+			expect(savedSettings.defaultModel).toBe("claude-opus-4-5");
 		});
 
 		it("should let in-memory changes override file changes for same key", async () => {
-			const settingsPath = join(agentDir, "settings.json");
-			writeFileSync(
-				settingsPath,
-				JSON.stringify({
-					theme: "dark",
-				}),
-			);
+			const settingsPath = join(agentDir, "settings.toml");
+			writeFileSync(settingsPath, 'defaultModel = "claude-sonnet"\n');
 
 			const manager = SettingsManager.create(projectDir, agentDir);
 
 			// User externally sets thinking level to "low"
-			const currentSettings = JSON.parse(readFileSync(settingsPath, "utf-8"));
-			currentSettings.defaultThinkingLevel = "low";
-			writeFileSync(settingsPath, JSON.stringify(currentSettings, null, 2));
+			writeFileSync(settingsPath, 'defaultModel = "claude-sonnet"\ndefaultThinkingLevel = "low"\n');
 
 			// But then changes it via UI to "high"
 			manager.setDefaultThinkingLevel("high");
 			await manager.flush();
 
 			// In-memory change should win
-			const savedSettings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+			const savedSettings = readToml(settingsPath);
 			expect(savedSettings.defaultThinkingLevel).toBe("high");
 		});
 	});
 
 	describe("deviceId", () => {
 		it("creates one global device ID and reuses it in later processes", async () => {
-			const settingsPath = join(agentDir, "settings.json");
-			writeFileSync(settingsPath, JSON.stringify({ theme: "dark" }));
-			writeFileSync(join(projectDir, ".pi", "settings.json"), JSON.stringify({ deviceId: "project-device" }));
+			const settingsPath = join(agentDir, "settings.toml");
+			writeFileSync(settingsPath, 'defaultModel = "claude-sonnet"\n');
+			writeFileSync(join(projectDir, ".nekopal", "settings.toml"), 'deviceId = "project-device"\n');
 			const first = SettingsManager.create(projectDir, agentDir);
 
 			const deviceId = first.getOrCreateDeviceId();
@@ -124,19 +111,14 @@ describe("SettingsManager", () => {
 			expect(deviceId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
 			expect(first.getOrCreateDeviceId()).toBe(deviceId);
 			expect(SettingsManager.create(projectDir, agentDir).getOrCreateDeviceId()).toBe(deviceId);
-			expect(JSON.parse(readFileSync(settingsPath, "utf-8"))).toEqual({ theme: "dark", deviceId });
+			expect(readToml(settingsPath)).toEqual({ defaultModel: "claude-sonnet", deviceId });
 		});
 	});
 
 	describe("packages migration", () => {
 		it("should keep local-only extensions in extensions array", () => {
-			const settingsPath = join(agentDir, "settings.json");
-			writeFileSync(
-				settingsPath,
-				JSON.stringify({
-					extensions: ["/local/ext.ts", "./relative/ext.ts"],
-				}),
-			);
+			const settingsPath = join(agentDir, "settings.toml");
+			writeFileSync(settingsPath, 'extensions = ["/local/ext.ts", "./relative/ext.ts"]\n');
 
 			const manager = SettingsManager.create(projectDir, agentDir);
 
@@ -145,19 +127,13 @@ describe("SettingsManager", () => {
 		});
 
 		it("should handle packages with filtering objects", () => {
-			const settingsPath = join(agentDir, "settings.json");
+			const settingsPath = join(agentDir, "settings.toml");
 			writeFileSync(
 				settingsPath,
-				JSON.stringify({
-					packages: [
-						"npm:simple-pkg",
-						{
-							source: "npm:shitty-extensions",
-							extensions: ["extensions/oracle.ts"],
-							skills: [],
-						},
-					],
-				}),
+				[
+					'packages = ["npm:simple-pkg", { source = "npm:shitty-extensions", extensions = ["extensions/oracle.ts"], skills = [] }]',
+					"",
+				].join("\n"),
 			);
 
 			const manager = SettingsManager.create(projectDir, agentDir);
@@ -175,110 +151,94 @@ describe("SettingsManager", () => {
 
 	describe("reload", () => {
 		it("should reload global settings from disk", async () => {
-			const settingsPath = join(agentDir, "settings.json");
-			writeFileSync(
-				settingsPath,
-				JSON.stringify({
-					theme: "dark",
-					extensions: ["/before.ts"],
-				}),
-			);
+			const settingsPath = join(agentDir, "settings.toml");
+			writeFileSync(settingsPath, 'defaultModel = "claude-sonnet"\nextensions = ["/before.ts"]\n');
 
 			const manager = SettingsManager.create(projectDir, agentDir);
 
-			writeFileSync(
-				settingsPath,
-				JSON.stringify({
-					theme: "light",
-					extensions: ["/after.ts"],
-					defaultModel: "claude-sonnet",
-				}),
-			);
+			writeFileSync(settingsPath, 'defaultModel = "claude-opus-4-5"\nextensions = ["/after.ts"]\n');
 
 			await manager.reload();
 
-			expect(manager.getTheme()).toBe("light");
+			expect(manager.getDefaultModel()).toBe("claude-opus-4-5");
 			expect(manager.getExtensionPaths()).toEqual(["/after.ts"]);
-			expect(manager.getDefaultModel()).toBe("claude-sonnet");
 		});
 
 		it("should keep previous settings and report the file path when the file is invalid", async () => {
-			const settingsPath = join(agentDir, "settings.json");
-			writeFileSync(settingsPath, JSON.stringify({ theme: "dark" }));
+			const settingsPath = join(agentDir, "settings.toml");
+			writeFileSync(settingsPath, 'defaultModel = "claude-sonnet"\n');
 
 			const manager = SettingsManager.create(projectDir, agentDir);
 
-			writeFileSync(settingsPath, "{ invalid json");
+			writeFileSync(settingsPath, "{ invalid toml");
 			await manager.reload();
 
-			expect(manager.getTheme()).toBe("dark");
-			expect(manager.drainErrors()).toMatchObject([{ scope: "global", path: settingsPath }]);
+			expect(manager.getDefaultModel()).toBe("claude-sonnet");
+			expect(manager.drainErrors()).toMatchObject([{ scope: "global" }]);
 		});
 	});
 
-	describe("theme setting", () => {
-		it("stores slash-separated automatic theme settings separately from fixed theme names", async () => {
-			const settingsPath = join(agentDir, "settings.json");
-			writeFileSync(settingsPath, JSON.stringify({ theme: "light/dark" }));
+	describe("default model setting", () => {
+		it("stores provider and model and reloads them", async () => {
+			const settingsPath = join(agentDir, "settings.toml");
+			writeFileSync(settingsPath, 'defaultProvider = "anthropic"\ndefaultModel = "claude-sonnet-4-5"\n');
 
 			const manager = SettingsManager.create(projectDir, agentDir);
 
-			expect(manager.getTheme()).toBeUndefined();
-			expect(manager.getThemeSetting()).toBe("light/dark");
+			expect(manager.getDefaultProvider()).toBe("anthropic");
+			expect(manager.getDefaultModel()).toBe("claude-sonnet-4-5");
 
-			manager.setTheme("solarized-light/tokyo-night");
+			manager.setDefaultModelAndProvider("openai", "gpt-5.2");
 			await manager.flush();
 
-			const savedSettings = JSON.parse(readFileSync(settingsPath, "utf-8"));
-			expect(savedSettings.theme).toBe("solarized-light/tokyo-night");
+			const savedSettings = readToml(settingsPath);
+			expect(savedSettings.defaultProvider).toBe("openai");
+			expect(savedSettings.defaultModel).toBe("gpt-5.2");
 		});
 	});
 
 	describe("error tracking", () => {
 		it("should collect and clear load errors via drainErrors", () => {
-			const globalSettingsPath = join(agentDir, "settings.json");
-			const projectSettingsPath = join(projectDir, ".pi", "settings.json");
-			writeFileSync(globalSettingsPath, "{ invalid global json");
-			writeFileSync(projectSettingsPath, "{ invalid project json");
+			const globalSettingsPath = join(agentDir, "settings.toml");
+			const projectSettingsPath = join(projectDir, ".nekopal", "settings.toml");
+			writeFileSync(globalSettingsPath, "{ invalid global toml");
+			writeFileSync(projectSettingsPath, "{ invalid project toml");
 
 			const manager = SettingsManager.create(projectDir, agentDir);
 			const errors = manager.drainErrors();
 
 			expect(errors).toHaveLength(2);
-			expect(errors).toMatchObject([
-				{ scope: "global", path: globalSettingsPath },
-				{ scope: "project", path: projectSettingsPath },
-			]);
+			expect(errors.map((error) => error.scope)).toEqual(["global", "project"]);
 			expect(manager.drainErrors()).toEqual([]);
 		});
 	});
 
 	describe("project trust", () => {
 		it("should skip project settings when project is not trusted", () => {
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ theme: "global" }));
-			writeFileSync(join(projectDir, ".pi", "settings.json"), JSON.stringify({ theme: "project" }));
+			writeFileSync(join(agentDir, "settings.toml"), 'defaultModel = "global"\n');
+			writeFileSync(join(projectDir, ".nekopal", "settings.toml"), 'defaultModel = "project"\n');
 
 			const manager = SettingsManager.create(projectDir, agentDir, { projectTrusted: false });
 
 			expect(manager.isProjectTrusted()).toBe(false);
-			expect(manager.getTheme()).toBe("global");
+			expect(manager.getDefaultModel()).toBe("global");
 			expect(manager.getProjectSettings()).toEqual({});
 		});
 
 		it("should reload project settings after trust changes to true", () => {
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ theme: "global" }));
-			writeFileSync(join(projectDir, ".pi", "settings.json"), JSON.stringify({ theme: "project" }));
+			writeFileSync(join(agentDir, "settings.toml"), 'defaultModel = "global"\n');
+			writeFileSync(join(projectDir, ".nekopal", "settings.toml"), 'defaultModel = "project"\n');
 			const manager = SettingsManager.create(projectDir, agentDir, { projectTrusted: false });
 
 			manager.setProjectTrusted(true);
 
 			expect(manager.isProjectTrusted()).toBe(true);
-			expect(manager.getTheme()).toBe("project");
+			expect(manager.getDefaultModel()).toBe("project");
 		});
 
 		it("should fail project settings writes when project is not trusted", async () => {
-			const projectSettingsPath = join(projectDir, ".pi", "settings.json");
-			writeFileSync(projectSettingsPath, JSON.stringify({ packages: ["npm:existing"] }));
+			const projectSettingsPath = join(projectDir, ".nekopal", "settings.toml");
+			writeFileSync(projectSettingsPath, 'packages = ["npm:existing"]\n');
 			const manager = SettingsManager.create(projectDir, agentDir, { projectTrusted: false });
 
 			expect(() => manager.setProjectPackages(["npm:new"])).toThrow(
@@ -287,12 +247,12 @@ describe("SettingsManager", () => {
 			await manager.flush();
 
 			expect(manager.getProjectSettings()).toEqual({});
-			expect(JSON.parse(readFileSync(projectSettingsPath, "utf-8"))).toEqual({ packages: ["npm:existing"] });
+			expect(readToml(projectSettingsPath)).toEqual({ packages: ["npm:existing"] });
 		});
 
 		it("should read default project trust from global settings only", () => {
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ defaultProjectTrust: "always" }));
-			writeFileSync(join(projectDir, ".pi", "settings.json"), JSON.stringify({ defaultProjectTrust: "never" }));
+			writeFileSync(join(agentDir, "settings.toml"), 'defaultProjectTrust = "always"\n');
+			writeFileSync(join(projectDir, ".nekopal", "settings.toml"), 'defaultProjectTrust = "never"\n');
 
 			const manager = SettingsManager.create(projectDir, agentDir);
 
@@ -300,7 +260,7 @@ describe("SettingsManager", () => {
 		});
 
 		it("should default invalid project trust settings to ask", () => {
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ defaultProjectTrust: "sometimes" }));
+			writeFileSync(join(agentDir, "settings.toml"), 'defaultProjectTrust = "sometimes"\n');
 
 			const manager = SettingsManager.create(projectDir, agentDir);
 
@@ -309,65 +269,46 @@ describe("SettingsManager", () => {
 	});
 
 	describe("project settings directory creation", () => {
-		it("should not create .pi folder when only reading project settings", () => {
-			// Create agent dir with global settings, but NO .pi folder in project
-			const settingsPath = join(agentDir, "settings.json");
-			writeFileSync(settingsPath, JSON.stringify({ theme: "dark" }));
+		it("should not create .nekopal folder when only reading project settings", () => {
+			// Create agent dir with global settings, but NO .nekopal folder in project
+			const settingsPath = join(agentDir, "settings.toml");
+			writeFileSync(settingsPath, 'defaultModel = "claude-sonnet"\n');
 
-			// Delete the .pi folder that beforeEach created
-			rmSync(join(projectDir, ".pi"), { recursive: true });
+			// Delete the .nekopal folder that beforeEach created
+			rmSync(join(projectDir, ".nekopal"), { recursive: true });
 
 			// Create SettingsManager (reads both global and project settings)
 			const manager = SettingsManager.create(projectDir, agentDir);
 
-			// .pi folder should NOT have been created just from reading
-			expect(existsSync(join(projectDir, ".pi"))).toBe(false);
+			// .nekopal folder should NOT have been created just from reading
+			expect(existsSync(join(projectDir, ".nekopal"))).toBe(false);
 
 			// Settings should still be loaded from global
-			expect(manager.getTheme()).toBe("dark");
+			expect(manager.getDefaultModel()).toBe("claude-sonnet");
 		});
 
-		it("should create .pi folder when writing project settings", async () => {
-			// Create agent dir with global settings, but NO .pi folder in project
-			const settingsPath = join(agentDir, "settings.json");
-			writeFileSync(settingsPath, JSON.stringify({ theme: "dark" }));
+		it("should create .nekopal folder when writing project settings", async () => {
+			// Create agent dir with global settings, but NO .nekopal folder in project
+			const settingsPath = join(agentDir, "settings.toml");
+			writeFileSync(settingsPath, 'defaultModel = "claude-sonnet"\n');
 
-			// Delete the .pi folder that beforeEach created
-			rmSync(join(projectDir, ".pi"), { recursive: true });
+			// Delete the .nekopal folder that beforeEach created
+			rmSync(join(projectDir, ".nekopal"), { recursive: true });
 
 			const manager = SettingsManager.create(projectDir, agentDir);
 
-			// .pi folder should NOT exist yet
-			expect(existsSync(join(projectDir, ".pi"))).toBe(false);
+			// .nekopal folder should NOT exist yet
+			expect(existsSync(join(projectDir, ".nekopal"))).toBe(false);
 
 			// Write a project-specific setting
 			manager.setProjectPackages([{ source: "npm:test-pkg" }]);
 			await manager.flush();
 
-			// Now .pi folder should exist
-			expect(existsSync(join(projectDir, ".pi"))).toBe(true);
+			// Now .nekopal folder should exist
+			expect(existsSync(join(projectDir, ".nekopal"))).toBe(true);
 
 			// And settings file should be created
-			expect(existsSync(join(projectDir, ".pi", "settings.json"))).toBe(true);
-		});
-	});
-
-	describe("terminal capability overrides", () => {
-		it("maps explicit values and omits auto values", () => {
-			const getOverrides = (terminal: NonNullable<Settings["terminal"]>) =>
-				SettingsManager.inMemory({ terminal }).getTerminalCapabilityOverrides();
-
-			expect(getOverrides({ images: false, trueColor: false, hyperlinks: false })).toEqual({
-				images: null,
-				trueColor: false,
-				hyperlinks: false,
-			});
-			expect(getOverrides({ images: "kitty", trueColor: true, hyperlinks: true })).toEqual({
-				images: "kitty",
-				trueColor: true,
-				hyperlinks: true,
-			});
-			expect(getOverrides({ images: "auto", trueColor: "auto", hyperlinks: "auto" })).toEqual({});
+			expect(existsSync(join(projectDir, ".nekopal", "settings.toml"))).toBe(true);
 		});
 	});
 
@@ -394,8 +335,8 @@ describe("SettingsManager", () => {
 		});
 
 		it("should use merged global and project settings", () => {
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ httpIdleTimeoutMs: 300000 }));
-			writeFileSync(join(projectDir, ".pi", "settings.json"), JSON.stringify({ httpIdleTimeoutMs: 0 }));
+			writeFileSync(join(agentDir, "settings.toml"), "httpIdleTimeoutMs = 300000\n");
+			writeFileSync(join(projectDir, ".nekopal", "settings.toml"), "httpIdleTimeoutMs = 0\n");
 
 			const manager = SettingsManager.create(projectDir, agentDir);
 
@@ -403,7 +344,7 @@ describe("SettingsManager", () => {
 		});
 
 		it("should reject invalid timeout values", () => {
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ httpIdleTimeoutMs: -1 }));
+			writeFileSync(join(agentDir, "settings.toml"), "httpIdleTimeoutMs = -1\n");
 			const manager = SettingsManager.create(projectDir, agentDir);
 
 			expect(() => manager.getHttpIdleTimeoutMs()).toThrow("Invalid httpIdleTimeoutMs setting");
@@ -414,13 +355,13 @@ describe("SettingsManager", () => {
 		it("defaults to idle and ignores project settings", () => {
 			expect(SettingsManager.create(projectDir, agentDir).getCacheWarmingMode()).toBe("idle");
 
-			writeFileSync(join(projectDir, ".pi", "settings.json"), JSON.stringify({ cacheWarming: "streaming" }));
+			writeFileSync(join(projectDir, ".nekopal", "settings.toml"), 'cacheWarming = "streaming"\n');
 			expect(SettingsManager.create(projectDir, agentDir).getCacheWarmingMode()).toBe("idle");
 
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ cacheWarming: "streaming" }));
+			writeFileSync(join(agentDir, "settings.toml"), 'cacheWarming = "streaming"\n');
 			expect(SettingsManager.create(projectDir, agentDir).getCacheWarmingMode()).toBe("streaming");
 
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ cacheWarming: "bogus" }));
+			writeFileSync(join(agentDir, "settings.toml"), 'cacheWarming = "bogus"\n');
 			expect(SettingsManager.create(projectDir, agentDir).getCacheWarmingMode()).toBe("idle");
 		});
 
@@ -430,178 +371,14 @@ describe("SettingsManager", () => {
 			await manager.flush();
 
 			expect(SettingsManager.create(projectDir, agentDir).getCacheWarmingMode()).toBe("off");
-			expect(JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8"))).toEqual({ cacheWarming: "off" });
-		});
-	});
-
-	describe("externalEditor", () => {
-		const originalVisual = process.env.VISUAL;
-		const originalEditor = process.env.EDITOR;
-		const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
-
-		function setEditorEnv(visual?: string, editor?: string): void {
-			if (visual === undefined) delete process.env.VISUAL;
-			else process.env.VISUAL = visual;
-			if (editor === undefined) delete process.env.EDITOR;
-			else process.env.EDITOR = editor;
-		}
-
-		afterEach(() => {
-			setEditorEnv(originalVisual, originalEditor);
-			if (originalPlatform) {
-				Object.defineProperty(process, "platform", originalPlatform);
-			}
-		});
-
-		it("should resolve editor commands by precedence", () => {
-			setEditorEnv("vim", "nano");
-			expect(SettingsManager.inMemory({ externalEditor: "code --wait" }).getExternalEditorCommand()).toBe(
-				"code --wait",
-			);
-			expect(SettingsManager.inMemory().getExternalEditorCommand()).toBe("vim");
-
-			setEditorEnv(undefined, "emacs");
-			expect(SettingsManager.inMemory().getExternalEditorCommand()).toBe("emacs");
-		});
-
-		it("should fall back to platform defaults", () => {
-			setEditorEnv();
-			Object.defineProperty(process, "platform", { value: "win32" });
-			expect(SettingsManager.inMemory().getExternalEditorCommand()).toBe("notepad");
-
-			Object.defineProperty(process, "platform", { value: "darwin" });
-			expect(SettingsManager.inMemory().getExternalEditorCommand()).toBe("nano");
-
-			Object.defineProperty(process, "platform", { value: "linux" });
-			expect(SettingsManager.inMemory().getExternalEditorCommand()).toBe("nano");
-		});
-	});
-
-	describe("TUI mode", () => {
-		it("defaults to fullscreen and persists regular mode", async () => {
-			const manager = SettingsManager.create(projectDir, agentDir);
-
-			expect(manager.getTuiMode()).toBe("fullscreen");
-
-			manager.setTuiMode("regular");
-			await manager.flush();
-
-			expect(manager.getTuiMode()).toBe("regular");
-			const savedSettings = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8"));
-			expect(savedSettings.tuiMode).toBe("regular");
-		});
-
-		it("falls back to fullscreen for unsupported values", () => {
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ tuiMode: "other" }));
-
-			const manager = SettingsManager.create(projectDir, agentDir);
-
-			expect(manager.getTuiMode()).toBe("fullscreen");
-		});
-
-		it("does not recognize the old uiMode setting", () => {
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ uiMode: "regular" }));
-
-			const manager = SettingsManager.create(projectDir, agentDir);
-
-			expect(manager.getTuiMode()).toBe("fullscreen");
-		});
-	});
-
-	it("validates and persists fullscreen settings", async () => {
-		const manager = SettingsManager.create(projectDir, agentDir);
-		expect(manager.getFullscreenExitOutput()).toBe("transcript");
-		expect(manager.getFullscreenScrollbar()).toBe("auto");
-		expect(manager.getFullscreenCopyOnSelect()).toBe(true);
-
-		manager.setFullscreenExitOutput("resume-hint");
-		manager.setFullscreenScrollbar("hidden");
-		manager.setFullscreenCopyOnSelect(false);
-		await manager.flush();
-		const savedSettings = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8"));
-		expect(savedSettings.fullscreenExitOutput).toBe("resume-hint");
-		expect(savedSettings.fullscreenScrollbar).toBe("hidden");
-		expect(savedSettings.fullscreenCopyOnSelect).toBe(false);
-
-		writeFileSync(
-			join(agentDir, "settings.json"),
-			JSON.stringify({ fullscreenExitOutput: "nothing", fullscreenScrollbar: "sometimes" }),
-		);
-		const reloadedManager = SettingsManager.create(projectDir, agentDir);
-		expect(reloadedManager.getFullscreenExitOutput()).toBe("transcript");
-		expect(reloadedManager.getFullscreenScrollbar()).toBe("auto");
-		expect(reloadedManager.getFullscreenCopyOnSelect()).toBe(true);
-	});
-
-	// #9758: wheel scrolling defaults to auto, persists line counts, and ignores invalid values.
-	it("persists fullscreen wheel scroll lines", async () => {
-		const manager = SettingsManager.create(projectDir, agentDir);
-		expect(manager.getFullscreenWheelScrollLines()).toBe("auto");
-
-		manager.setFullscreenWheelScrollLines(3);
-		await manager.flush();
-		expect(JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8")).fullscreenWheelScrollLines).toBe(3);
-
-		for (const [value, expected] of [
-			[7.9, 7],
-			[0, 1],
-			[1000, 100],
-			["fast", "auto"],
-			[null, "auto"],
-		] as const) {
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ fullscreenWheelScrollLines: value }));
-			expect(SettingsManager.create(projectDir, agentDir).getFullscreenWheelScrollLines()).toBe(expected);
-		}
-	});
-
-	describe("outputPad", () => {
-		it("should default to 1 and persist binary values", async () => {
-			const manager = SettingsManager.create(projectDir, agentDir);
-
-			expect(manager.getOutputPad()).toBe(1);
-
-			manager.setOutputPad(0);
-			await manager.flush();
-
-			expect(manager.getOutputPad()).toBe(0);
-			const savedSettings = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8"));
-			expect(savedSettings.outputPad).toBe(0);
-		});
-
-		it("should treat unsupported outputPad values as default padding", () => {
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ outputPad: 2 }));
-
-			const manager = SettingsManager.create(projectDir, agentDir);
-
-			expect(manager.getOutputPad()).toBe(1);
-		});
-	});
-
-	describe("markdown.mermaid", () => {
-		it("defaults to streaming and persists rendering modes", async () => {
-			const manager = SettingsManager.create(projectDir, agentDir);
-
-			expect(manager.getMermaidRenderingMode()).toBe("streaming");
-
-			manager.setMermaidRenderingMode("final");
-			await manager.flush();
-
-			expect(manager.getMermaidRenderingMode()).toBe("final");
-			const savedSettings = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8"));
-			expect(savedSettings.markdown.mermaid).toBe("final");
-		});
-
-		it("falls back to streaming for unsupported values", () => {
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ markdown: { mermaid: "sometimes" } }));
-
-			expect(SettingsManager.create(projectDir, agentDir).getMermaidRenderingMode()).toBe("streaming");
+			expect(readToml(join(agentDir, "settings.toml"))).toEqual({ cacheWarming: "off" });
 		});
 	});
 
 	describe("shellCommandPrefix", () => {
 		it("should load shellCommandPrefix from settings", () => {
-			const settingsPath = join(agentDir, "settings.json");
-			writeFileSync(settingsPath, JSON.stringify({ shellCommandPrefix: "shopt -s expand_aliases" }));
+			const settingsPath = join(agentDir, "settings.toml");
+			writeFileSync(settingsPath, 'shellCommandPrefix = "shopt -s expand_aliases"\n');
 
 			const manager = SettingsManager.create(projectDir, agentDir);
 
@@ -609,8 +386,8 @@ describe("SettingsManager", () => {
 		});
 
 		it("should return undefined when shellCommandPrefix is not set", () => {
-			const settingsPath = join(agentDir, "settings.json");
-			writeFileSync(settingsPath, JSON.stringify({ theme: "dark" }));
+			const settingsPath = join(agentDir, "settings.toml");
+			writeFileSync(settingsPath, 'defaultModel = "claude-sonnet"\n');
 
 			const manager = SettingsManager.create(projectDir, agentDir);
 
@@ -618,26 +395,26 @@ describe("SettingsManager", () => {
 		});
 
 		it("should preserve shellCommandPrefix when saving unrelated settings", async () => {
-			const settingsPath = join(agentDir, "settings.json");
-			writeFileSync(settingsPath, JSON.stringify({ shellCommandPrefix: "shopt -s expand_aliases" }));
+			const settingsPath = join(agentDir, "settings.toml");
+			writeFileSync(settingsPath, 'shellCommandPrefix = "shopt -s expand_aliases"\n');
 
 			const manager = SettingsManager.create(projectDir, agentDir);
-			manager.setTheme("light");
+			manager.setDefaultThinkingLevel("high");
 			await manager.flush();
 
-			const savedSettings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+			const savedSettings = readToml(settingsPath);
 			expect(savedSettings.shellCommandPrefix).toBe("shopt -s expand_aliases");
-			expect(savedSettings.theme).toBe("light");
+			expect(savedSettings.defaultThinkingLevel).toBe("high");
 		});
 	});
 
 	describe("defaultTools", () => {
 		it("loads global defaults and lets project settings replace them", () => {
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ defaultTools: ["read", "bash"] }));
+			writeFileSync(join(agentDir, "settings.toml"), 'defaultTools = ["read", "bash"]\n');
 
 			expect(SettingsManager.create(projectDir, agentDir).getDefaultTools()).toEqual(["read", "bash"]);
 
-			writeFileSync(join(projectDir, ".pi", "settings.json"), JSON.stringify({ defaultTools: ["grep"] }));
+			writeFileSync(join(projectDir, ".nekopal", "settings.toml"), 'defaultTools = ["grep"]\n');
 
 			expect(SettingsManager.create(projectDir, agentDir).getDefaultTools()).toEqual(["grep"]);
 		});
@@ -652,6 +429,13 @@ describe("SettingsManager", () => {
 				"read",
 				"bash",
 				"edit",
+				"grep",
+				"find",
+				"ls",
+				"memory",
+				"cron",
+				"send",
+				"config_set",
 				"codemode",
 			]);
 			expect(SettingsManager.inMemory({ defaultTools: ["read", "+grep", "+read"] }).getDefaultTools()).toEqual([
@@ -662,12 +446,12 @@ describe("SettingsManager", () => {
 
 		it("layers project modifiers on top of the global selection", () => {
 			writeFileSync(
-				join(agentDir, "settings.json"),
-				JSON.stringify({ defaultTools: ["read", "bash", "+codemode"] }),
+				join(agentDir, "settings.toml"),
+				'defaultTools = ["read", "bash", "+codemode"]\n',
 			);
 			writeFileSync(
-				join(projectDir, ".pi", "settings.json"),
-				JSON.stringify({ defaultTools: ["-codemode", "+tool_search"] }),
+				join(projectDir, ".nekopal", "settings.toml"),
+				'defaultTools = ["-codemode", "+tool_search"]\n',
 			);
 
 			const manager = SettingsManager.create(projectDir, agentDir);
@@ -678,13 +462,20 @@ describe("SettingsManager", () => {
 		});
 
 		it("applies project modifiers to the built-in defaults without a global setting", () => {
-			writeFileSync(join(projectDir, ".pi", "settings.json"), JSON.stringify({ defaultTools: ["+codemode"] }));
+			writeFileSync(join(projectDir, ".nekopal", "settings.toml"), 'defaultTools = ["+codemode"]\n');
 
 			expect(SettingsManager.create(projectDir, agentDir).getDefaultTools()).toEqual([
 				"read",
 				"bash",
 				"edit",
 				"write",
+				"grep",
+				"find",
+				"ls",
+				"memory",
+				"cron",
+				"send",
+				"config_set",
 				"codemode",
 			]);
 		});
@@ -692,26 +483,26 @@ describe("SettingsManager", () => {
 
 	describe("getSessionDir", () => {
 		it("should return undefined when not set", () => {
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ theme: "dark" }));
+			writeFileSync(join(agentDir, "settings.toml"), 'defaultModel = "claude-sonnet"\n');
 			const manager = SettingsManager.create(projectDir, agentDir);
 			expect(manager.getSessionDir()).toBeUndefined();
 		});
 
 		it("should return global sessionDir", () => {
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ sessionDir: "/tmp/sessions" }));
+			writeFileSync(join(agentDir, "settings.toml"), 'sessionDir = "/tmp/sessions"\n');
 			const manager = SettingsManager.create(projectDir, agentDir);
 			expect(manager.getSessionDir()).toBe("/tmp/sessions");
 		});
 
 		it("should return project sessionDir, overriding global", () => {
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ sessionDir: "/global/sessions" }));
-			writeFileSync(join(projectDir, ".pi", "settings.json"), JSON.stringify({ sessionDir: "./sessions" }));
+			writeFileSync(join(agentDir, "settings.toml"), 'sessionDir = "/global/sessions"\n');
+			writeFileSync(join(projectDir, ".nekopal", "settings.toml"), 'sessionDir = "./sessions"\n');
 			const manager = SettingsManager.create(projectDir, agentDir);
 			expect(manager.getSessionDir()).toBe("./sessions");
 		});
 
 		it("should expand ~ in sessionDir", () => {
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ sessionDir: "~/sessions" }));
+			writeFileSync(join(agentDir, "settings.toml"), 'sessionDir = "~/sessions"\n');
 			const manager = SettingsManager.create(projectDir, agentDir);
 			expect(manager.getSessionDir()).toBe(join(homedir(), "sessions"));
 		});
@@ -719,30 +510,39 @@ describe("SettingsManager", () => {
 
 	describe("getShellPath", () => {
 		it("should return undefined when not set", () => {
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ theme: "dark" }));
+			writeFileSync(join(agentDir, "settings.toml"), 'defaultModel = "claude-sonnet"\n');
 			const manager = SettingsManager.create(projectDir, agentDir);
 			expect(manager.getShellPath()).toBeUndefined();
 		});
 
 		it("should return an absolute shellPath unchanged", () => {
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ shellPath: "/bin/zsh" }));
+			writeFileSync(join(agentDir, "settings.toml"), 'shellPath = "/bin/zsh"\n');
 			const manager = SettingsManager.create(projectDir, agentDir);
 			expect(manager.getShellPath()).toBe("/bin/zsh");
 		});
 
 		it("should expand ~ in shellPath", () => {
-			writeFileSync(
-				join(agentDir, "settings.json"),
-				JSON.stringify({ shellPath: "~/.local/bin/agent-shell-sandbox" }),
-			);
+			writeFileSync(join(agentDir, "settings.toml"), 'shellPath = "~/.local/bin/agent-shell-sandbox"\n');
 			const manager = SettingsManager.create(projectDir, agentDir);
 			expect(manager.getShellPath()).toBe(join(homedir(), ".local/bin/agent-shell-sandbox"));
 		});
 
 		it("should expand a bare ~ in shellPath", () => {
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ shellPath: "~" }));
+			writeFileSync(join(agentDir, "settings.toml"), 'shellPath = "~"\n');
 			const manager = SettingsManager.create(projectDir, agentDir);
 			expect(manager.getShellPath()).toBe(homedir());
+		});
+	});
+
+	describe("NekoPal settings", () => {
+		it("merges [nekopal] with defaults", () => {
+			writeFileSync(join(agentDir, "settings.toml"), "[nekopal.memory]\nmemoryChars = 3000\n");
+
+			const manager = SettingsManager.create(projectDir, agentDir);
+			const nekopal = manager.getNekoPal();
+
+			expect(nekopal.memory.memoryChars).toBe(3000);
+			expect(nekopal.memory.userChars).toBe(1375);
 		});
 	});
 });

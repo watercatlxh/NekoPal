@@ -1,4 +1,4 @@
-import { expect, expectTypeOf, it } from "vitest";
+import { expectTypeOf, it } from "vitest";
 import { XAI_MODELS } from "../src/providers/xai.models.ts";
 
 it("derives model API, ID, and provider literals from grouped model data", () => {

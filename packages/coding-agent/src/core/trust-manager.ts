@@ -28,12 +28,11 @@ export interface ProjectTrustOption {
 type TrustFile = Record<string, boolean | null | undefined>;
 
 const TRUST_REQUIRING_PROJECT_CONFIG_RESOURCES = [
-	"settings.json",
+	"settings.toml",
 	"mcp.json",
 	"extensions",
 	"skills",
 	"prompts",
-	"themes",
 	"SYSTEM.md",
 	"APPEND_SYSTEM.md",
 ] as const;

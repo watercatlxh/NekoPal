@@ -75,9 +75,13 @@ describe("openai-responses provider defaults", () => {
 		vi.restoreAllMocks();
 	});
 
-	// #2567: Copilot rejected reasoning.effort "none". gpt-6-sol has off: "none", so this exercises the Copilot exception.
-	it("omits reasoning when no reasoning is requested", async () => {
-		const model = getModel("github-copilot", "gpt-6-sol");
+	// #2567: Copilot rejected reasoning.effort "none" even though the model mapped off to it.
+	it("omits reasoning when compat disables the off level", async () => {
+		const model: Model<"openai-responses"> = {
+			...getModel("openai", "gpt-6-sol"),
+			provider: "github-copilot",
+			thinkingLevelMap: { ...getModel("openai", "gpt-6-sol").thinkingLevelMap, off: null },
+		};
 		let capturedPayload: unknown;
 
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -159,8 +163,13 @@ describe("openai-responses provider defaults", () => {
 		});
 	});
 
-	it("sets strict mode explicitly for Cloudflare OpenAI Responses tools", async () => {
-		const model = getModel("cloudflare-ai-gateway", "gpt-5.6-sol");
+	it("sets strict mode explicitly for a gateway OpenAI Responses model", async () => {
+		const model: Model<"openai-responses"> = {
+			...getModel("openai", "gpt-5.6-sol"),
+			provider: "cloudflare-ai-gateway",
+			baseUrl: "https://gateway.ai.cloudflare.com/v1/account/gateway/openai",
+			compat: { supportsStrictMode: true },
+		};
 		let capturedPayload: CapturedResponsesPayload | undefined;
 
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -421,7 +430,12 @@ describe("openai-responses provider defaults", () => {
 	});
 
 	it("uses OpenAI no-session format for OpenCode Responses models", async () => {
-		const model = getModel("opencode", "gpt-5.4");
+		const model: Model<"openai-responses"> = {
+			...getModel("openai", "gpt-5.4"),
+			provider: "opencode",
+			baseUrl: "https://opencode.ai/v1",
+			compat: { sessionAffinityFormat: "openai-nosession" },
+		};
 		let capturedPayload: CapturedResponsesPayload | undefined;
 		const captured = await captureOpenAIResponseHeaders(
 			{

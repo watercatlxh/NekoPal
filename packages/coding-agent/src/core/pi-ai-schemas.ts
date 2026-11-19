@@ -1,6 +1,6 @@
 /**
  * pi-ai's configuration schemas (built with pi-schema) as TypeBox schemas, for the coding agent's own TypeBox-built
- * configuration schemas (models.json, settings.json): the same JSON, typed for TypeBox's `Static`.
+ * configuration schemas (models.json, settings.toml): the same JSON, typed for TypeBox's `Static`.
  */
 
 import {

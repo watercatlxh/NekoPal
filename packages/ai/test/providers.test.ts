@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { lazyApi } from "../src/api/lazy.ts";
 import { envApiKeyAuth } from "../src/auth/helpers.ts";
-import type { AuthContext, AuthEvent } from "../src/auth/types.ts";
+import type { AuthContext } from "../src/auth/types.ts";
 import { getModel as getCompatModel, getModels as getCompatModels } from "../src/compat.ts";
-import { createModels, createProvider, getSupportedThinkingLevels } from "../src/models.ts";
+import { createModels, createProvider } from "../src/models.ts";
 import { InMemoryModelsStore } from "../src/models-store.ts";
 import {
 	builtinModels,
@@ -183,7 +183,6 @@ describe("builtin providers", () => {
 		expect(result?.auth.apiKey).toBe("oauth-token");
 		expect(result?.source).toBe("ANTHROPIC_OAUTH_TOKEN");
 	});
-
 });
 
 describe("envApiKeyAuth", () => {
