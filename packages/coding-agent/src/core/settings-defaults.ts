@@ -3,7 +3,6 @@ import { DEFAULT_MAX_AGENT_RETRY_DELAY_MS } from "@earendil-works/pi-ai/utils/re
 /** Runtime defaults shared by settings accessors and the published JSON Schema. */
 export const SETTINGS_DEFAULTS = {
 	transport: "auto",
-	sessionShareDestination: "auto",
 	steeringMode: "one-at-a-time",
 	followUpMode: "one-at-a-time",
 	compaction: {
@@ -24,32 +23,12 @@ export const SETTINGS_DEFAULTS = {
 			maxRetryDelayMs: 60000,
 		},
 	},
-	hideThinkingBlock: false,
 	showCacheMissNotices: false,
-	quietStartup: false,
 	defaultProjectTrust: "ask",
-	collapseChangelog: false,
-	enableInstallTelemetry: true,
-	enableAnalytics: false,
 	enableSkillCommands: true,
-	terminal: {
-		showImages: true,
-		imageWidthCells: 60,
-		clearOnShrink: false,
-		showTerminalProgress: false,
-	},
 	images: {
 		autoResize: true,
 		blockImages: false,
-	},
-	doubleEscapeAction: "tree",
-	treeFilterMode: "default",
-	editorPaddingX: 0,
-	outputPad: 1,
-	autocompleteMaxVisible: 5,
-	markdown: {
-		codeBlockIndent: "  ",
-		mermaid: "streaming",
 	},
 	warnings: {
 		anthropicExtraUsage: true,
@@ -59,9 +38,4 @@ export const SETTINGS_DEFAULTS = {
 		inlineBudget: 3000,
 	},
 	cacheWarming: "idle",
-	tuiMode: "fullscreen",
-	fullscreenExitOutput: "transcript",
-	fullscreenScrollbar: "auto",
-	fullscreenCopyOnSelect: true,
-	fullscreenWheelScrollLines: "auto",
 } as const;

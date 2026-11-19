@@ -2,7 +2,6 @@ import type { Static } from "@earendil-works/pi-schema";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import {
 	AnthropicMessagesCompatSchema,
-	BedrockCompatSchema,
 	OpenAICompletionsCompatSchema,
 	OpenAIResponsesCompatSchema,
 	ProviderCompatSchema,
@@ -36,7 +35,6 @@ describe("compatibility schemas", () => {
 		const anthropicDefaults = defaults(AnthropicMessagesCompatSchema);
 		expect(anthropicDefaults).not.toHaveProperty("sendSessionAffinityHeaders");
 		expect(anthropicDefaults).toMatchObject({ supportsLongCacheRetention: true });
-		expect(defaults(BedrockCompatSchema)).toMatchObject({ supportsStrictMode: false });
 	});
 
 	it("does not assign API-specific defaults to the provider superset", () => {

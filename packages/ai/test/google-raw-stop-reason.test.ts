@@ -90,16 +90,30 @@ vi.mock("@google/genai", () => {
 });
 
 import { stream as streamGoogleGenerativeAi } from "../src/api/google-generative-ai.ts";
-import { stream as streamGoogleVertex } from "../src/api/google-vertex.ts";
-import { getModel, normalizeContext } from "../src/compat.ts";
-import type { Api, Model, StreamOptions } from "../src/types.ts";
+import { normalizeContext } from "../src/compat.ts";
+import type { Api, Model } from "../src/types.ts";
 import { formatUserAgent } from "../src/utils/identity.ts";
+
+function makeModel(id = "gemini-2.5-flash"): Model<"google-generative-ai"> {
+	return {
+		id,
+		name: id,
+		api: "google-generative-ai",
+		provider: "google",
+		baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+		reasoning: false,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 1_000_000,
+		maxTokens: 8192,
+	};
+}
 
 beforeEach(() => {
 	googleGenAiMock.streamChunks = undefined;
 });
 
-const PI_USER_AGENT = formatUserAgent();
+const USER_AGENT = formatUserAgent();
 
 const context = normalizeContext({
 	messages: [{ role: "user", content: "hello", timestamp: Date.now() }],
@@ -109,7 +123,7 @@ async function captureGoogleHeaders(headers?: Record<string, string>): Promise<R
 	googleGenAiMock.constructorCalls.length = 0;
 	googleGenAiMock.finishReason = "STOP";
 	googleGenAiMock.includeFunctionCall = false;
-	await streamGoogleGenerativeAi(getModel("google", "gemini-2.5-flash"), context, {
+	await streamGoogleGenerativeAi(makeModel(), context, {
 		apiKey: "test-api-key",
 		headers,
 	}).result();
@@ -124,7 +138,7 @@ describe("Google raw stop reasons", () => {
 		googleGenAiMock.finishReason = "MALFORMED_FUNCTION_CALL";
 		googleGenAiMock.includeFunctionCall = false;
 
-		const stream = streamGoogleGenerativeAi(getModel("google", "gemini-2.5-flash"), context, {
+		const stream = streamGoogleGenerativeAi(makeModel(), context, {
 			apiKey: "test-api-key",
 		});
 
@@ -135,41 +149,12 @@ describe("Google raw stop reasons", () => {
 		expect(message.errorMessage).toBe("Provider stopped with: MALFORMED_FUNCTION_CALL");
 	});
 
-	it("preserves raw Gemini finish reasons for Google Vertex errors", async () => {
-		googleGenAiMock.finishReason = "SAFETY";
-		googleGenAiMock.includeFunctionCall = false;
-
-		const stream = streamGoogleVertex(getModel("google-vertex", "gemini-3-flash-preview"), context, {
-			project: "test-project",
-			location: "us-central1",
+	const createStream = () =>
+		streamGoogleGenerativeAi(makeModel(), context, {
+			apiKey: "test-api-key",
 		});
 
-		const message = await stream.result();
-
-		expect(message.stopReason).toBe("error");
-		expect(message.rawStopReason).toBe("SAFETY");
-		expect(message.errorMessage).toBe("Provider stopped with: SAFETY");
-	});
-
-	const adapters = [
-		{
-			name: "Google Generative AI",
-			createStream: () =>
-				streamGoogleGenerativeAi(getModel("google", "gemini-2.5-flash"), context, {
-					apiKey: "test-api-key",
-				}),
-		},
-		{
-			name: "Google Vertex",
-			createStream: () =>
-				streamGoogleVertex(getModel("google-vertex", "gemini-3-flash-preview"), context, {
-					project: "test-project",
-					location: "us-central1",
-				}),
-		},
-	];
-
-	it.each(adapters)("preserves MAX_TOKENS with a tool call as length for $name", async ({ createStream }) => {
+	it("preserves MAX_TOKENS with a tool call as length", async () => {
 		googleGenAiMock.finishReason = "MAX_TOKENS";
 		googleGenAiMock.includeFunctionCall = true;
 
@@ -180,7 +165,7 @@ describe("Google raw stop reasons", () => {
 		expect(message.content.some((block) => block.type === "toolCall")).toBe(true);
 	});
 
-	it.each(adapters)("maps STOP with a tool call to toolUse for $name", async ({ createStream }) => {
+	it("maps STOP with a tool call to toolUse", async () => {
 		googleGenAiMock.finishReason = "STOP";
 		googleGenAiMock.includeFunctionCall = true;
 
@@ -193,65 +178,43 @@ describe("Google raw stop reasons", () => {
 });
 
 describe("Google provider stream events", () => {
-	const googleModel = getModel("google", "gemini-2.5-flash");
-	const vertexModel = getModel("google-vertex", "gemini-3-flash-preview");
-	const adapters = [
-		{
-			name: "Google Generative AI",
-			model: googleModel,
-			createStream: (onProviderStreamEvent: StreamOptions["onProviderStreamEvent"]) =>
-				streamGoogleGenerativeAi(googleModel, context, {
-					apiKey: "test-api-key",
-					onProviderStreamEvent,
-				}),
-		},
-		{
-			name: "Google Vertex",
-			model: vertexModel,
-			createStream: (onProviderStreamEvent: StreamOptions["onProviderStreamEvent"]) =>
-				streamGoogleVertex(vertexModel, context, {
-					project: "test-project",
-					location: "us-central1",
-					onProviderStreamEvent,
-				}),
-		},
-	];
+	const googleModel = makeModel();
 
-	it.each(adapters)(
-		"forwards each SDK chunk in order before normalizing it for $name",
-		async ({ model, createStream }) => {
-			googleGenAiMock.streamChunks = [
-				{
-					responseId: "resp_google",
-					candidates: [{ content: { parts: [{ text: "hello" }] } }],
-				},
-				{
-					candidates: [{ finishReason: "STOP" }],
-					usageMetadata: { promptTokenCount: 2, candidatesTokenCount: 1, totalTokenCount: 3 },
-				},
-			];
-			const received: unknown[] = [];
-			const eventModels: Model<Api>[] = [];
-			const result = await createStream(async (chunk, eventModel) => {
+	it("forwards each SDK chunk in order before normalizing it", async () => {
+		googleGenAiMock.streamChunks = [
+			{
+				responseId: "resp_google",
+				candidates: [{ content: { parts: [{ text: "hello" }] } }],
+			},
+			{
+				candidates: [{ finishReason: "STOP" }],
+				usageMetadata: { promptTokenCount: 2, candidatesTokenCount: 1, totalTokenCount: 3 },
+			},
+		];
+		const received: unknown[] = [];
+		const eventModels: Model<Api>[] = [];
+		const result = await streamGoogleGenerativeAi(googleModel, context, {
+			apiKey: "test-api-key",
+			onProviderStreamEvent: async (chunk, eventModel) => {
 				await Promise.resolve();
 				received.push(chunk);
 				eventModels.push(eventModel);
-			}).result();
+			},
+		}).result();
 
-			expect(received).toEqual(googleGenAiMock.streamChunks);
-			expect(received[0]).toBe(googleGenAiMock.streamChunks[0]);
-			expect(received[1]).toBe(googleGenAiMock.streamChunks[1]);
-			expect(eventModels).toEqual([model, model]);
-			expect(result.stopReason).toBe("stop");
-			expect(result.responseId).toBe("resp_google");
-			expect(result.content).toEqual([{ type: "text", text: "hello" }]);
-		},
-	);
+		expect(received).toEqual(googleGenAiMock.streamChunks);
+		expect(received[0]).toBe(googleGenAiMock.streamChunks[0]);
+		expect(received[1]).toBe(googleGenAiMock.streamChunks[1]);
+		expect(eventModels).toEqual([googleModel, googleModel]);
+		expect(result.stopReason).toBe("stop");
+		expect(result.responseId).toBe("resp_google");
+		expect(result.content).toEqual([{ type: "text", text: "hello" }]);
+	});
 });
 
 describe("Google Generative AI user agent", () => {
 	it("uses pi's User-Agent by default", async () => {
-		expect((await captureGoogleHeaders())["User-Agent"]).toBe(PI_USER_AGENT);
+		expect((await captureGoogleHeaders())["User-Agent"]).toBe(USER_AGENT);
 	});
 
 	it("lets explicit headers override the default User-Agent", async () => {

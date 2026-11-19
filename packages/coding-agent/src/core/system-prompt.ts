@@ -3,7 +3,6 @@
  */
 
 import { getSystemMessageText } from "@earendil-works/pi-ai";
-import { getDocsPath, getExamplesPath, getReadmePath } from "../config.ts";
 import { formatSkillsForPrompt, type Skill } from "./skills.ts";
 
 export interface BuildSystemPromptOptions {
@@ -99,6 +98,9 @@ function buildRules(
 		rules.push(normalized);
 	};
 
+	const hasRead = selectedTools.includes("read");
+	const hasEdit = selectedTools.includes("edit");
+	const hasWrite = selectedTools.includes("write");
 	const hasBash = selectedTools.includes("bash");
 	const hasPowerShell = selectedTools.includes("powershell");
 	const hasGrep = selectedTools.includes("grep");
@@ -120,7 +122,9 @@ function buildRules(
 	}
 	for (const rule of promptGuidelines) addRule(rule);
 	addRule("Be concise in your responses");
-	addRule("Show file paths clearly when working with files");
+	if (hasRead || hasEdit || hasWrite) addRule("Show file paths clearly when working with files");
+	addRule("Answer casual questions directly, without tools");
+	addRule("Reply in the language the user writes in");
 	return rules.map((rule) => `- ${rule}`).join("\n");
 }
 
@@ -153,19 +157,12 @@ export function buildSystemPromptSections(input: BuildSystemPromptOptions): Syst
 		promptSections.preamble = customPrompt;
 	} else {
 		promptSections.preamble =
-			"You are a coding assistant running inside pi, a coding agent harness. Help users inspect files, run commands, and modify code.";
+			"You are NekoPal, a personal assistant running as a daemon on the user's own machine and talking to the user through chat apps. Help with questions, research, writing, reminders, automation and coding. You can read and change files and run commands on this machine.";
 		const visibleTools = declaredTools.filter((name) => !!toolSnippets[name]);
 		const tools =
 			visibleTools.length > 0 ? visibleTools.map((name) => `- ${name}: ${toolSnippets[name]}`).join("\n") : "(none)";
 		promptSections.tools = `${tools}\n\nAdditional tools may be available.`;
 		promptSections.rules = buildRules(declaredTools, toolGuidelines, promptGuidelines);
-		promptSections.docs = `Pi documentation (read only when the user asks about the harness itself, its SDK, extensions, themes, skills, or TUI):
-- Main documentation: ${getReadmePath()}
-- Additional docs: ${getDocsPath()}
-- Examples: ${getExamplesPath()} (extensions, custom tools, SDK)
-- When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory
-- When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), packages (docs/packages.md), environment variables (docs/environment-variables.md), MCP servers (docs/mcp.md), codemode scripts and non-LLM models such as classifiers and image models (docs/codemode.md)
-- Before implementing harness changes, read the relevant docs and examples in full, following related cross-references.`;
 	}
 
 	if (appendSystemPrompt) promptSections.addendum = appendSystemPrompt;

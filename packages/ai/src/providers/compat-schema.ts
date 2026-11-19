@@ -534,53 +534,6 @@ export const AnthropicMessagesCompatSchema = openObject(AnthropicMessagesCompatP
 	additionalProperties: true,
 });
 
-const BedrockCompatProperties = {
-	supportsStrictMode: optionalCompatBoolean({
-		description: "Whether the model supports Bedrock strict tool schemas.",
-		default: false,
-	}),
-};
-
-export const BedrockCompatSchema = openObject(BedrockCompatProperties, {
-	description: "Compatibility settings for Amazon Bedrock models.",
-	additionalProperties: true,
-});
-
-const MistralConversationsCompatProperties = {
-	supportsMidConvoSystemMessages: optionalCompatBoolean({
-		description:
-			"Whether the exact model accepts system messages after the conversation has started. When false, later system messages are folded into the leading system message.",
-		default: false,
-	}),
-	supportsStrictMode: optionalCompatBoolean({
-		description: "Whether the model supports strict (schema-constrained) function tools.",
-		default: false,
-	}),
-};
-
-export const MistralConversationsCompatSchema = openObject(MistralConversationsCompatProperties, {
-	description: "Compatibility settings for the Mistral chat API.",
-	additionalProperties: true,
-});
-
-const SystemOneCompatProperties = {
-	imageInput: opt(
-		union([stringLiteral("assets"), stringLiteral("images"), stringLiteral("state-image-urls")], {
-			description:
-				'How the service takes classifier images. "assets" sends TypeSafe\'s assets map (PNG and JPEG) and references the images from the state, as TypeSafe and Jev on Workers AI expect. "images" sends Clef\'s images list of data URLs (PNG, JPEG, and WebP, at most four), as Clef on Workers AI expects. "state-image-urls" places image_url parts before the state, as OpenRouter expects; OpenRouter drops assets without an error. Auto-detected from the provider, baseUrl, and model ID. Classifier models read it from the provider-level compat; models and modelOverrides entries apply to chat models only.',
-		}),
-	),
-	sendImageOptInHeader: optionalCompatBoolean({
-		description:
-			"Whether requests with images send the TypeSafe-Danger-Zone-Images: true header, which TypeSafe's own API requires for its experimental image input. Defaults to true for the typesafe-system-one API unless the model is detected as OpenRouter.",
-	}),
-};
-
-export const SystemOneCompatSchema = openObject(SystemOneCompatProperties, {
-	description: "Compatibility settings for System One classifier APIs.",
-	additionalProperties: true,
-});
-
 const ProviderCompatPropertyOverrides = {
 	supportsDeveloperRole: optionalCompatBoolean({
 		description: "Whether the provider supports the developer role instead of system. Defaults are API-specific.",
@@ -668,13 +621,8 @@ function mergeCompatProperties<const PropertyGroups extends readonly Properties[
 export const CompatSchemasByApi = {
 	"openai-completions": OpenAICompletionsCompatSchema,
 	"openai-responses": OpenAIResponsesCompatSchema,
-	"azure-openai-responses": OpenAIResponsesCompatSchema,
 	"openai-codex-responses": OpenAIResponsesCompatSchema,
 	"anthropic-messages": AnthropicMessagesCompatSchema,
-	"bedrock-converse-stream": BedrockCompatSchema,
-	"mistral-conversations": MistralConversationsCompatSchema,
-	"typesafe-system-one": SystemOneCompatSchema,
-	"cloudflare-workers-ai-system-one": SystemOneCompatSchema,
 } as const;
 
 const ProviderCompatProperties = mergeCompatProperties(
@@ -682,9 +630,6 @@ const ProviderCompatProperties = mergeCompatProperties(
 		OpenAICompletionsCompatProperties,
 		OpenAIResponsesCompatProperties,
 		AnthropicMessagesCompatProperties,
-		BedrockCompatProperties,
-		MistralConversationsCompatProperties,
-		SystemOneCompatProperties,
 	],
 	ProviderCompatPropertyOverrides,
 );
@@ -713,9 +658,3 @@ export interface OpenAICompletionsCompat extends Static<typeof OpenAICompletions
 export interface OpenAIResponsesCompat extends Static<typeof OpenAIResponsesCompatSchema> {}
 /** Compatibility settings for Anthropic Messages-compatible APIs. */
 export interface AnthropicMessagesCompat extends Static<typeof AnthropicMessagesCompatSchema> {}
-/** Compatibility settings for Amazon Bedrock models. */
-export interface BedrockCompat extends Static<typeof BedrockCompatSchema> {}
-/** Compatibility settings for the Mistral chat API. */
-export interface MistralConversationsCompat extends Static<typeof MistralConversationsCompatSchema> {}
-/** Compatibility settings for System One classifier APIs. */
-export interface SystemOneCompat extends Static<typeof SystemOneCompatSchema> {}

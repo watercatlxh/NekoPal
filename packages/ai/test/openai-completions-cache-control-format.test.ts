@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { stream as streamOpenAICompletions } from "../src/api/openai-completions.ts";
-import { getModel, normalizeContext } from "../src/compat.ts";
+import { normalizeContext } from "../src/compat.ts";
 import type { Message, Model } from "../src/types.ts";
 
 interface CacheControl {
@@ -122,6 +122,22 @@ function expectAnthropicCacheMarkers(params: CapturedParams): void {
 	expect((lastMessage.content as TextPart[])[0]?.cache_control).toEqual({ type: "ephemeral" });
 }
 
+function anthropicCacheModel(): Model<"openai-completions"> {
+	return {
+		id: "anthropic/claude-fable-5.1:batch",
+		name: "Claude Fable 5.1 (batch)",
+		api: "openai-completions",
+		provider: "openrouter",
+		baseUrl: "https://openrouter.ai/api/v1",
+		reasoning: true,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 200000,
+		maxTokens: 32000,
+		compat: { cacheControlFormat: "anthropic" },
+	};
+}
+
 describe("openai-completions cacheControlFormat", () => {
 	beforeEach(() => {
 		mockState.lastParams = undefined;
@@ -153,14 +169,14 @@ describe("openai-completions cacheControlFormat", () => {
 		expectAnthropicCacheMarkers(params);
 	});
 
-	it("preserves Anthropic-style cache markers for OpenRouter Anthropic batch aliases", async () => {
-		const model = getModel("openrouter", "anthropic/claude-fable-5.1:batch");
+	it("preserves Anthropic-style cache markers for Anthropic batch aliases", async () => {
+		const model = anthropicCacheModel();
 		const params = await capturePayload(model);
 		expectAnthropicCacheMarkers(params);
 	});
 
 	it("moves the conversation cache marker to a tool result", async () => {
-		const model = getModel("openrouter", "anthropic/claude-fable-5.1:batch");
+		const model = anthropicCacheModel();
 		const timestamp = Date.now();
 		const params = await capturePayload(model, undefined, [
 			{ role: "user", content: "Read the file", timestamp },

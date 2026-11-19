@@ -1,28 +1,35 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
-import type { ScrollViewScrollbar, TerminalCapabilities, WheelScrollLines } from "@earendil-works/pi-tui";
 import { randomUUID } from "crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import {
+	closeSync,
+	copyFileSync,
+	existsSync,
+	fsyncSync,
+	mkdirSync,
+	openSync,
+	readFileSync,
+	renameSync,
+	unlinkSync,
+	writeFileSync,
+} from "fs";
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
+import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { stripBom } from "../utils/text.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
+import { NEKOPAL_DEFAULTS, type NekoPalSettings } from "./nekopal-settings.ts";
 import { SETTINGS_DEFAULTS } from "./settings-defaults.ts";
 import type {
 	CacheWarmingMode,
 	CompactionModelOverride,
 	DefaultProjectTrust,
-	FullscreenExitOutput,
-	MermaidRenderingMode,
 	PackageSource,
-	QuietStartup,
-	SessionShareDestination,
 	Settings,
 	ThinkingBudgetsSettings,
 	TransportSetting,
-	TuiMode,
 	WarningSettings,
 } from "./settings-schema.ts";
 
@@ -34,20 +41,13 @@ export type {
 	CompactionModelOverride,
 	CompactionSettings,
 	DefaultProjectTrust,
-	FullscreenExitOutput,
 	ImageSettings,
-	MarkdownSettings,
-	MermaidRenderingMode,
 	PackageSource,
 	ProviderRetrySettings,
-	QuietStartup,
 	RetrySettings,
-	SessionShareDestination,
 	Settings,
-	TerminalSettings,
 	ThinkingBudgetsSettings,
 	TransportSetting,
-	TuiMode,
 	WarningSettings,
 } from "./settings-schema.ts";
 /** Cache-warming profile. "idle" also warms between agent runs. */
@@ -82,7 +82,19 @@ function deepMergeObjects(base: Record<string, unknown>, overrides: Record<strin
 }
 
 /** Tools enabled at startup when `defaultTools` does not change them. */
-export const DEFAULT_TOOL_NAMES: readonly string[] = ["read", "bash", "edit", "write"];
+export const DEFAULT_TOOL_NAMES: readonly string[] = [
+	"read",
+	"bash",
+	"edit",
+	"write",
+	"grep",
+	"find",
+	"ls",
+	"memory",
+	"cron",
+	"send",
+	"config_set",
+];
 
 /** Whether a tool selection entry is a `+name` or `-name` modifier. */
 export function isToolModifier(entry: unknown): boolean {
@@ -183,6 +195,50 @@ function toSettingsError(scope: SettingsScope, error: unknown, path?: string): S
 	};
 }
 
+/** Recursively drop `undefined` values: TOML cannot represent them, while JSON.stringify dropped them silently. */
+export function stripUndefinedDeep<T>(value: T): T {
+	if (Array.isArray(value)) {
+		return value.filter((entry) => entry !== undefined).map((entry) => stripUndefinedDeep(entry)) as unknown as T;
+	}
+	if (typeof value !== "object" || value === null) return value;
+	const result: Record<string, unknown> = {};
+	for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+		if (entry === undefined) continue;
+		result[key] = stripUndefinedDeep(entry);
+	}
+	return result as T;
+}
+
+/** Write settings atomically: keep the previous file as `settings.toml.bak`, then rename a synced temp file. */
+function writeSettingsFile(path: string, content: string): void {
+	const backupPath = `${path}.bak`;
+	if (existsSync(path)) {
+		try {
+			copyFileSync(path, backupPath);
+		} catch {
+			// A missing backup must not block the write.
+		}
+	}
+	const tempPath = `${path}.tmp-${process.pid}`;
+	const fd = openSync(tempPath, "w");
+	try {
+		writeFileSync(fd, content, "utf-8");
+		fsyncSync(fd);
+	} finally {
+		closeSync(fd);
+	}
+	try {
+		renameSync(tempPath, path);
+	} catch (error) {
+		try {
+			unlinkSync(tempPath);
+		} catch {
+			// Ignore cleanup failures.
+		}
+		throw error;
+	}
+}
+
 export class FileSettingsStorage implements SettingsStorage {
 	private globalSettingsPath: string;
 	private projectSettingsPath: string;
@@ -190,8 +246,8 @@ export class FileSettingsStorage implements SettingsStorage {
 	constructor(cwd: string, agentDir: string) {
 		const resolvedCwd = resolvePath(cwd);
 		const resolvedAgentDir = resolvePath(agentDir);
-		this.globalSettingsPath = join(resolvedAgentDir, "settings.json");
-		this.projectSettingsPath = join(resolvedCwd, CONFIG_DIR_NAME, "settings.json");
+		this.globalSettingsPath = join(resolvedAgentDir, "settings.toml");
+		this.projectSettingsPath = join(resolvedCwd, CONFIG_DIR_NAME, "settings.toml");
 	}
 
 	private acquireLockSyncWithRetry(path: string): () => void {
@@ -242,7 +298,7 @@ export class FileSettingsStorage implements SettingsStorage {
 				if (!release) {
 					release = this.acquireLockSyncWithRetry(path);
 				}
-				writeFileSync(path, next, "utf-8");
+				writeSettingsFile(path, next);
 			}
 		} finally {
 			if (release) {
@@ -359,7 +415,7 @@ export class SettingsManager {
 	static inMemory(settings: Partial<Settings> = {}, options: SettingsManagerCreateOptions = {}): SettingsManager {
 		const storage = new InMemorySettingsStorage();
 		const initialSettings = SettingsManager.migrateSettings(structuredClone(settings) as Record<string, unknown>);
-		storage.withLock("global", () => JSON.stringify(initialSettings, null, 2));
+		storage.withLock("global", () => stringifyToml(stripUndefinedDeep(initialSettings)));
 		return SettingsManager.fromStorage(storage, options);
 	}
 
@@ -377,7 +433,7 @@ export class SettingsManager {
 		if (!content) {
 			return {};
 		}
-		const settings = JSON.parse(stripBom(content));
+		const settings = parseToml(stripBom(content)) as Record<string, unknown>;
 		return SettingsManager.migrateSettings(settings);
 	}
 
@@ -603,7 +659,7 @@ export class SettingsManager {
 	): void {
 		this.storage.withLock(scope, (current) => {
 			const currentFileSettings = current
-				? SettingsManager.migrateSettings(JSON.parse(stripBom(current)) as Record<string, unknown>)
+				? SettingsManager.migrateSettings(parseToml(stripBom(current)) as Record<string, unknown>)
 				: {};
 			const mergedSettings: Settings = { ...currentFileSettings };
 			for (const field of modifiedFields) {
@@ -622,7 +678,7 @@ export class SettingsManager {
 				}
 			}
 
-			return JSON.stringify(mergedSettings, null, 2);
+			return stringifyToml(stripUndefinedDeep(mergedSettings));
 		});
 	}
 
@@ -677,28 +733,9 @@ export class SettingsManager {
 		return drained;
 	}
 
-	getLastChangelogVersion(): string | undefined {
-		return this.settings.lastChangelogVersion;
-	}
 
-	setLastChangelogVersion(version: string): void {
-		this.globalSettings.lastChangelogVersion = version;
-		this.markModified("lastChangelogVersion");
-		this.save();
-	}
 
-	getExtensionChangelogVersion(key: string): string | undefined {
-		return this.settings.extensionChangelogVersions?.[key];
-	}
 
-	setExtensionChangelogVersion(key: string, version: string): void {
-		this.globalSettings.extensionChangelogVersions = {
-			...(this.globalSettings.extensionChangelogVersions ?? {}),
-			[key]: version,
-		};
-		this.markModified("extensionChangelogVersions", key);
-		this.save();
-	}
 
 	getSessionDir(): string | undefined {
 		const sessionDir = this.settings.sessionDir;
@@ -753,22 +790,8 @@ export class SettingsManager {
 		this.save();
 	}
 
-	getThemeSetting(): string | undefined {
-		const value = this.settings.theme;
-		if (typeof value === "string") return value;
-		return undefined;
-	}
 
-	getTheme(): string | undefined {
-		const theme = this.getThemeSetting();
-		return theme?.includes("/") ? undefined : theme;
-	}
 
-	setTheme(theme: string): void {
-		this.globalSettings.theme = theme;
-		this.markModified("theme");
-		this.save();
-	}
 
 	getDefaultThinkingLevel(): ThinkingLevel | undefined {
 		return this.settings.defaultThinkingLevel;
@@ -817,18 +840,7 @@ export class SettingsManager {
 		this.save();
 	}
 
-	getSessionShareDestination(): SessionShareDestination {
-		const destination = this.settings.sessionShareDestination;
-		return destination === "gist" || destination === "radius"
-			? destination
-			: SETTINGS_DEFAULTS.sessionShareDestination;
-	}
 
-	setSessionShareDestination(destination: SessionShareDestination): void {
-		this.globalSettings.sessionShareDestination = destination;
-		this.markModified("sessionShareDestination");
-		this.save();
-	}
 
 	getCompactionEnabled(): boolean {
 		return this.settings.compaction?.enabled ?? SETTINGS_DEFAULTS.compaction.enabled;
@@ -963,31 +975,12 @@ export class SettingsManager {
 		return parseTimeoutSetting(this.settings.websocketConnectTimeoutMs, "websocketConnectTimeoutMs");
 	}
 
-	getHideThinkingBlock(): boolean {
-		return this.settings.hideThinkingBlock ?? SETTINGS_DEFAULTS.hideThinkingBlock;
-	}
 
 	getShowCacheMissNotices(): boolean {
 		return this.settings.showCacheMissNotices ?? SETTINGS_DEFAULTS.showCacheMissNotices;
 	}
 
-	getExternalEditorCommand(): string {
-		const configuredEditor = this.settings.externalEditor;
-		if (typeof configuredEditor === "string" && configuredEditor.trim() !== "") {
-			return configuredEditor;
-		}
-		const environmentEditor = process.env.VISUAL || process.env.EDITOR;
-		if (environmentEditor) {
-			return environmentEditor;
-		}
-		return process.platform === "win32" ? "notepad" : "nano";
-	}
 
-	setHideThinkingBlock(hide: boolean): void {
-		this.globalSettings.hideThinkingBlock = hide;
-		this.markModified("hideThinkingBlock");
-		this.save();
-	}
 
 	setShowCacheMissNotices(show: boolean): void {
 		this.globalSettings.showCacheMissNotices = show;
@@ -1006,16 +999,7 @@ export class SettingsManager {
 		this.save();
 	}
 
-	getQuietStartup(): QuietStartup {
-		const value = this.settings.quietStartup;
-		return value === true || value === "header" ? value : SETTINGS_DEFAULTS.quietStartup;
-	}
 
-	setQuietStartup(quiet: QuietStartup): void {
-		this.globalSettings.quietStartup = quiet;
-		this.markModified("quietStartup");
-		this.save();
-	}
 
 	getDefaultProjectTrust(): DefaultProjectTrust {
 		const value = this.globalSettings.defaultProjectTrust;
@@ -1048,44 +1032,13 @@ export class SettingsManager {
 		this.save();
 	}
 
-	getCollapseChangelog(): boolean {
-		return this.settings.collapseChangelog ?? SETTINGS_DEFAULTS.collapseChangelog;
-	}
 
-	setCollapseChangelog(collapse: boolean): void {
-		this.globalSettings.collapseChangelog = collapse;
-		this.markModified("collapseChangelog");
-		this.save();
-	}
 
-	getEnableInstallTelemetry(): boolean {
-		return this.settings.enableInstallTelemetry ?? SETTINGS_DEFAULTS.enableInstallTelemetry;
-	}
 
-	setEnableInstallTelemetry(enabled: boolean): void {
-		this.globalSettings.enableInstallTelemetry = enabled;
-		this.markModified("enableInstallTelemetry");
-		this.save();
-	}
 
-	getEnableAnalytics(): boolean {
-		return this.settings.enableAnalytics ?? SETTINGS_DEFAULTS.enableAnalytics;
-	}
 
-	getTrackingId(): string | undefined {
-		return this.settings.trackingId;
-	}
 
 	/** Set the analytics opt-in preference; generates a tracking identifier on first opt-in */
-	setEnableAnalytics(enabled: boolean): void {
-		this.globalSettings.enableAnalytics = enabled;
-		this.markModified("enableAnalytics");
-		if (enabled && !this.globalSettings.trackingId) {
-			this.globalSettings.trackingId = randomUUID();
-			this.markModified("trackingId");
-		}
-		this.save();
-	}
 
 	/**
 	 * Stable ID of this installation, e.g. sent to OpenAI as its agent host ID.
@@ -1165,21 +1118,8 @@ export class SettingsManager {
 		});
 	}
 
-	getThemePaths(): string[] {
-		return [...(this.settings.themes ?? [])];
-	}
 
-	setThemePaths(paths: string[]): void {
-		this.globalSettings.themes = paths;
-		this.markModified("themes");
-		this.save();
-	}
 
-	setProjectThemePaths(paths: string[]): void {
-		this.updateProjectSettings("themes", (settings) => {
-			settings.themes = paths;
-		});
-	}
 
 	getEnableSkillCommands(): boolean {
 		return this.settings.enableSkillCommands ?? SETTINGS_DEFAULTS.enableSkillCommands;
@@ -1191,137 +1131,37 @@ export class SettingsManager {
 		this.save();
 	}
 
+	/** NekoPal daemon settings: the `[nekopal]` table merged over its defaults. */
+	getNekoPal(): NekoPalSettings {
+		const configured = (this.settings.nekopal ?? {}) as NekoPalSettings;
+		return deepMergeObjects(
+			structuredClone(NEKOPAL_DEFAULTS) as Record<string, unknown>,
+			configured as Record<string, unknown>,
+		) as unknown as NekoPalSettings;
+	}
+
 	getThinkingBudgets(): ThinkingBudgetsSettings | undefined {
 		return this.settings.thinkingBudgets;
 	}
 
-	getTerminalCapabilityOverrides(): Partial<TerminalCapabilities> {
-		const terminal = this.settings.terminal;
-		const images = terminal?.images;
-		return {
-			...(images === "kitty" || images === "iterm2" ? { images } : images === false ? { images: null } : {}),
-			...(typeof terminal?.trueColor === "boolean" ? { trueColor: terminal.trueColor } : {}),
-			...(typeof terminal?.hyperlinks === "boolean" ? { hyperlinks: terminal.hyperlinks } : {}),
-		};
-	}
 
-	getShowImages(): boolean {
-		return this.settings.terminal?.showImages ?? SETTINGS_DEFAULTS.terminal.showImages;
-	}
 
-	setShowImages(show: boolean): void {
-		if (!this.globalSettings.terminal) {
-			this.globalSettings.terminal = {};
-		}
-		this.globalSettings.terminal.showImages = show;
-		this.markModified("terminal", "showImages");
-		this.save();
-	}
 
-	getImageWidthCells(): number {
-		const width = this.settings.terminal?.imageWidthCells;
-		if (typeof width !== "number" || !Number.isFinite(width)) {
-			return SETTINGS_DEFAULTS.terminal.imageWidthCells;
-		}
-		return Math.max(1, Math.floor(width));
-	}
 
-	setImageWidthCells(width: number): void {
-		if (!this.globalSettings.terminal) {
-			this.globalSettings.terminal = {};
-		}
-		this.globalSettings.terminal.imageWidthCells = Math.max(1, Math.floor(width));
-		this.markModified("terminal", "imageWidthCells");
-		this.save();
-	}
 
-	getClearOnShrink(): boolean {
-		// Settings takes precedence, then env var, then default false
-		if (this.settings.terminal?.clearOnShrink !== undefined) {
-			return this.settings.terminal.clearOnShrink;
-		}
-		if (process.env.PI_CLEAR_ON_SHRINK === "1") return true;
-		return SETTINGS_DEFAULTS.terminal.clearOnShrink;
-	}
 
-	setClearOnShrink(enabled: boolean): void {
-		if (!this.globalSettings.terminal) {
-			this.globalSettings.terminal = {};
-		}
-		this.globalSettings.terminal.clearOnShrink = enabled;
-		this.markModified("terminal", "clearOnShrink");
-		this.save();
-	}
 
-	getShowTerminalProgress(): boolean {
-		return this.settings.terminal?.showTerminalProgress ?? SETTINGS_DEFAULTS.terminal.showTerminalProgress;
-	}
 
-	setShowTerminalProgress(enabled: boolean): void {
-		if (!this.globalSettings.terminal) {
-			this.globalSettings.terminal = {};
-		}
-		this.globalSettings.terminal.showTerminalProgress = enabled;
-		this.markModified("terminal", "showTerminalProgress");
-		this.save();
-	}
 
-	getTuiMode(): TuiMode {
-		return this.settings.tuiMode === "regular" ? "regular" : SETTINGS_DEFAULTS.tuiMode;
-	}
 
-	setTuiMode(mode: TuiMode): void {
-		this.globalSettings.tuiMode = mode;
-		this.markModified("tuiMode");
-		this.save();
-	}
 
-	getFullscreenExitOutput(): FullscreenExitOutput {
-		return this.settings.fullscreenExitOutput === "resume-hint"
-			? "resume-hint"
-			: SETTINGS_DEFAULTS.fullscreenExitOutput;
-	}
 
-	setFullscreenExitOutput(output: FullscreenExitOutput): void {
-		this.globalSettings.fullscreenExitOutput = output;
-		this.markModified("fullscreenExitOutput");
-		this.save();
-	}
 
-	getFullscreenScrollbar(): ScrollViewScrollbar {
-		const mode = this.settings.fullscreenScrollbar;
-		return mode === "always" || mode === "hidden" ? mode : SETTINGS_DEFAULTS.fullscreenScrollbar;
-	}
 
-	setFullscreenScrollbar(mode: ScrollViewScrollbar): void {
-		this.globalSettings.fullscreenScrollbar = mode;
-		this.markModified("fullscreenScrollbar");
-		this.save();
-	}
 
-	getFullscreenCopyOnSelect(): boolean {
-		return this.settings.fullscreenCopyOnSelect ?? SETTINGS_DEFAULTS.fullscreenCopyOnSelect;
-	}
 
-	setFullscreenCopyOnSelect(enabled: boolean): void {
-		this.globalSettings.fullscreenCopyOnSelect = enabled;
-		this.markModified("fullscreenCopyOnSelect");
-		this.save();
-	}
 
-	getFullscreenWheelScrollLines(): WheelScrollLines {
-		const lines = this.settings.fullscreenWheelScrollLines;
-		return typeof lines === "number" && Number.isFinite(lines)
-			? Math.max(1, Math.min(100, Math.floor(lines)))
-			: SETTINGS_DEFAULTS.fullscreenWheelScrollLines;
-	}
 
-	setFullscreenWheelScrollLines(lines: WheelScrollLines): void {
-		this.globalSettings.fullscreenWheelScrollLines =
-			lines === "auto" ? lines : Math.max(1, Math.min(100, Math.floor(lines)));
-		this.markModified("fullscreenWheelScrollLines");
-		this.save();
-	}
 
 	getImageAutoResize(): boolean {
 		return this.settings.images?.autoResize ?? SETTINGS_DEFAULTS.images.autoResize;
@@ -1366,83 +1206,20 @@ export class SettingsManager {
 		this.save();
 	}
 
-	getDoubleEscapeAction(): "fork" | "tree" | "none" {
-		return this.settings.doubleEscapeAction ?? SETTINGS_DEFAULTS.doubleEscapeAction;
-	}
 
-	setDoubleEscapeAction(action: "fork" | "tree" | "none"): void {
-		this.globalSettings.doubleEscapeAction = action;
-		this.markModified("doubleEscapeAction");
-		this.save();
-	}
 
-	getTreeFilterMode(): "default" | "no-tools" | "user-only" | "labeled-only" | "all" {
-		const mode = this.settings.treeFilterMode;
-		const valid = ["default", "no-tools", "user-only", "labeled-only", "all"];
-		return mode && valid.includes(mode) ? mode : SETTINGS_DEFAULTS.treeFilterMode;
-	}
 
-	setTreeFilterMode(mode: "default" | "no-tools" | "user-only" | "labeled-only" | "all"): void {
-		this.globalSettings.treeFilterMode = mode;
-		this.markModified("treeFilterMode");
-		this.save();
-	}
 
-	getShowHardwareCursor(): boolean {
-		return this.settings.showHardwareCursor ?? process.env.PI_HARDWARE_CURSOR === "1";
-	}
 
-	setShowHardwareCursor(enabled: boolean): void {
-		this.globalSettings.showHardwareCursor = enabled;
-		this.markModified("showHardwareCursor");
-		this.save();
-	}
 
-	getEditorPaddingX(): number {
-		return this.settings.editorPaddingX ?? SETTINGS_DEFAULTS.editorPaddingX;
-	}
 
-	setEditorPaddingX(padding: number): void {
-		this.globalSettings.editorPaddingX = Math.max(0, Math.min(3, Math.floor(padding)));
-		this.markModified("editorPaddingX");
-		this.save();
-	}
 
-	getOutputPad(): 0 | 1 {
-		return this.settings.outputPad === 0 ? 0 : SETTINGS_DEFAULTS.outputPad;
-	}
 
-	setOutputPad(padding: 0 | 1): void {
-		this.globalSettings.outputPad = padding;
-		this.markModified("outputPad");
-		this.save();
-	}
 
-	getAutocompleteMaxVisible(): number {
-		return this.settings.autocompleteMaxVisible ?? SETTINGS_DEFAULTS.autocompleteMaxVisible;
-	}
 
-	setAutocompleteMaxVisible(maxVisible: number): void {
-		this.globalSettings.autocompleteMaxVisible = Math.max(3, Math.min(20, Math.floor(maxVisible)));
-		this.markModified("autocompleteMaxVisible");
-		this.save();
-	}
 
-	getCodeBlockIndent(): string {
-		return this.settings.markdown?.codeBlockIndent ?? SETTINGS_DEFAULTS.markdown.codeBlockIndent;
-	}
 
-	getMermaidRenderingMode(): MermaidRenderingMode {
-		const mode = this.settings.markdown?.mermaid;
-		return mode === "off" || mode === "final" ? mode : SETTINGS_DEFAULTS.markdown.mermaid;
-	}
 
-	setMermaidRenderingMode(mode: MermaidRenderingMode): void {
-		this.globalSettings.markdown ??= {};
-		this.globalSettings.markdown.mermaid = mode;
-		this.markModified("markdown", "mermaid");
-		this.save();
-	}
 
 	getWarnings(): WarningSettings {
 		return { ...(this.settings.warnings ?? {}) };

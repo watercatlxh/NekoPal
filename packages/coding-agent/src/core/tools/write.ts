@@ -3,8 +3,8 @@ import { dirname } from "path";
 import { type Static, Type } from "typebox";
 import type { ExtensionContext, ToolDefinition } from "../extensions/types.ts";
 import { withFileMutationQueue } from "./file-mutation-queue.ts";
+import { checkProtectedPath } from "./protected-paths.ts";
 import { resolveToCwd } from "./path-utils.ts";
-import { writeRenderers } from "./renderers/write.ts";
 import { type TypeBoxAgentTool, wrapToolDefinition } from "./tool-definition-wrapper.ts";
 
 const writeSchema = Type.Object({
@@ -62,6 +62,8 @@ export function createWriteToolDefinition(
 			ctx?: ExtensionContext,
 		) {
 			const absolutePath = resolveToCwd(path, ctx?.cwd || cwd);
+			const blocked = checkProtectedPath(absolutePath);
+			if (blocked) throw new Error(blocked);
 			const dir = dirname(absolutePath);
 			return withFileMutationQueue(absolutePath, async () => {
 				// Do not reject from an abort event listener here: that would release the
@@ -87,7 +89,6 @@ export function createWriteToolDefinition(
 				};
 			});
 		},
-		...writeRenderers,
 	};
 }
 

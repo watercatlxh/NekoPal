@@ -3,7 +3,6 @@ import { createRequire } from "module";
 import { homedir } from "os";
 import { basename, dirname, join, resolve, sep, win32 } from "path";
 import { fileURLToPath } from "url";
-import { spawnProcessSync } from "./utils/child-process.ts";
 import { normalizePath } from "./utils/paths.ts";
 import { stripBom } from "./utils/text.ts";
 
@@ -27,366 +26,6 @@ export const isBunRuntime = !!process.versions.bun;
 /** Detect the esbuild-bundled Node.js distribution. */
 declare const PI_BUNDLED_NODE: boolean;
 export const isBundledNode = typeof PI_BUNDLED_NODE !== "undefined" && PI_BUNDLED_NODE;
-
-// =============================================================================
-// Install Method Detection
-// =============================================================================
-
-export type InstallMethod = "bun-binary" | "npm" | "pnpm" | "yarn" | "bun" | "unknown";
-
-interface SelfUpdateCommandStep {
-	command: string;
-	args: string[];
-	display: string;
-}
-
-export interface SelfUpdateCommand extends SelfUpdateCommandStep {
-	steps?: SelfUpdateCommandStep[];
-}
-
-export type SelfUpdatePackageTarget = string | { packageName: string; installSpec?: string };
-
-function normalizeSelfUpdatePackageTarget(target: SelfUpdatePackageTarget): {
-	packageName: string;
-	installSpec: string;
-} {
-	if (typeof target === "string") {
-		return { packageName: target, installSpec: target };
-	}
-	return { packageName: target.packageName, installSpec: target.installSpec ?? target.packageName };
-}
-
-function makeSelfUpdateCommand(
-	installStep: SelfUpdateCommandStep,
-	uninstallStep?: SelfUpdateCommandStep,
-): SelfUpdateCommand {
-	if (!uninstallStep) return installStep;
-	return {
-		...installStep,
-		display: `${uninstallStep.display} && ${installStep.display}`,
-		steps: [uninstallStep, installStep],
-	};
-}
-
-function makeSelfUpdateCommandStep(command: string, args: string[]): SelfUpdateCommandStep {
-	return {
-		command,
-		args,
-		display: [command, ...args].map((arg) => (/\s/.test(arg) ? `"${arg}"` : arg)).join(" "),
-	};
-}
-
-export function detectInstallMethod(): InstallMethod {
-	if (isBunBinary) {
-		return "bun-binary";
-	}
-
-	const resolvedPath = `${__dirname}\0${process.execPath || ""}`.toLowerCase().replace(/\\/g, "/");
-
-	if (resolvedPath.includes("/pnpm/") || resolvedPath.includes("/.pnpm/")) {
-		return "pnpm";
-	}
-	if (resolvedPath.includes("/yarn/") || resolvedPath.includes("/.yarn/")) {
-		return "yarn";
-	}
-	if (isBunRuntime || resolvedPath.includes("/install/global/node_modules/")) {
-		return "bun";
-	}
-	if (resolvedPath.includes("/npm/") || resolvedPath.includes("/node_modules/")) {
-		return "npm";
-	}
-
-	return "unknown";
-}
-
-function getInferredNpmInstall(): { root: string; prefix: string } | undefined {
-	const packageDir = getPackageDir();
-	const path = process.platform === "win32" || packageDir.includes("\\") ? win32 : { basename, dirname };
-	const parent = path.dirname(packageDir);
-	let root: string | undefined;
-	if (path.basename(parent).startsWith("@") && path.basename(path.dirname(parent)) === "node_modules") {
-		root = path.dirname(parent);
-	} else if (path.basename(parent) === "node_modules") {
-		root = parent;
-	}
-	if (!root) return undefined;
-	const rootParent = path.dirname(root);
-	if (path.basename(rootParent) === "lib") return { root, prefix: path.dirname(rootParent) };
-	// Windows global npm prefixes use `<prefix>\\node_modules`, which is
-	// indistinguishable from local project installs by path shape alone. Do not
-	// infer unsupported Windows custom prefixes without `npm root -g` evidence.
-	return undefined;
-}
-
-function getSelfUpdateCommandForMethod(
-	method: InstallMethod,
-	installedPackageName: string,
-	updatePackageTarget: SelfUpdatePackageTarget = installedPackageName,
-	npmCommand?: string[],
-): SelfUpdateCommand | undefined {
-	const target = normalizeSelfUpdatePackageTarget(updatePackageTarget);
-	switch (method) {
-		case "bun-binary":
-			return undefined;
-		case "pnpm": {
-			const match = readCommandOutput("pnpm", ["root", "-g"])
-				? undefined
-				: /^(.*[\\/]global[\\/][^\\/]+)[\\/]\.pnpm[\\/]/.exec(getPackageDir());
-			const binDirArgs = match
-				? [`--config.global-bin-dir=${process.env.PNPM_HOME || dirname(dirname(match[1]))}`]
-				: [];
-			return makeSelfUpdateCommand(
-				makeSelfUpdateCommandStep("pnpm", [
-					"install",
-					"-g",
-					"--ignore-scripts",
-					"--config.minimumReleaseAge=0",
-					...binDirArgs,
-					target.installSpec,
-				]),
-				target.packageName === installedPackageName
-					? undefined
-					: makeSelfUpdateCommandStep("pnpm", ["remove", "-g", ...binDirArgs, installedPackageName]),
-			);
-		}
-		case "yarn":
-			return makeSelfUpdateCommand(
-				makeSelfUpdateCommandStep("yarn", ["global", "add", "--ignore-scripts", target.installSpec]),
-				target.packageName === installedPackageName
-					? undefined
-					: makeSelfUpdateCommandStep("yarn", ["global", "remove", installedPackageName]),
-			);
-		case "bun":
-			return makeSelfUpdateCommand(
-				makeSelfUpdateCommandStep("bun", [
-					"install",
-					"-g",
-					"--ignore-scripts",
-					"--minimum-release-age=0",
-					target.installSpec,
-				]),
-				target.packageName === installedPackageName
-					? undefined
-					: makeSelfUpdateCommandStep("bun", ["uninstall", "-g", installedPackageName]),
-			);
-		case "npm": {
-			const [command = "npm", ...npmArgs] = npmCommand ?? [];
-			const inferred = npmCommand?.length ? undefined : getInferredNpmInstall();
-			const prefixArgs = [...npmArgs, ...(inferred ? ["--prefix", inferred.prefix] : [])];
-			// pi.dev advertises releases immediately, so a configured npm age gate would
-			// block the update. npm has no per-package age gate, so this also lets new
-			// transitive dependency releases through. Managed installs avoid this.
-			const installStep = makeSelfUpdateCommandStep(command, [
-				...prefixArgs,
-				"install",
-				"-g",
-				"--ignore-scripts",
-				"--min-release-age=0",
-				target.installSpec,
-			]);
-			const uninstallStep =
-				target.packageName === installedPackageName
-					? undefined
-					: makeSelfUpdateCommandStep(command, [...prefixArgs, "uninstall", "-g", installedPackageName]);
-			return makeSelfUpdateCommand(installStep, uninstallStep);
-		}
-		case "unknown":
-			return undefined;
-	}
-}
-
-function readCommandOutput(
-	command: string,
-	args: string[],
-	options: { requireSuccess?: boolean } = {},
-): string | undefined {
-	const result = spawnProcessSync(command, args, {
-		encoding: "utf-8",
-		stdio: ["ignore", "pipe", "pipe"],
-	});
-	if (result.status === 0) return result.stdout.trim() || undefined;
-	if (options.requireSuccess) {
-		const reason = result.error?.message || result.stderr.trim() || `exit code ${result.status ?? "unknown"}`;
-		throw new Error(`Failed to run ${[command, ...args].join(" ")}: ${reason}`);
-	}
-	return undefined;
-}
-
-function getGlobalPackageRoots(method: InstallMethod, _packageName: string, npmCommand?: string[]): string[] {
-	switch (method) {
-		case "npm": {
-			const configured = !!npmCommand?.length;
-			const [command = "npm", ...npmArgs] = npmCommand ?? [];
-			if (configured && command === "bun") {
-				const bunBin = readCommandOutput(command, [...npmArgs, "pm", "bin", "-g"], {
-					requireSuccess: true,
-				});
-				const roots = [join(homedir(), ".bun", "install", "global", "node_modules")];
-				if (bunBin) {
-					roots.push(join(dirname(bunBin), "install", "global", "node_modules"));
-				}
-				return roots;
-			}
-			const root = readCommandOutput(command, [...npmArgs, "root", "-g"], {
-				requireSuccess: configured,
-			});
-			const inferred = configured ? undefined : getInferredNpmInstall();
-			return [root, inferred?.root].filter((x): x is string => !!x);
-		}
-		case "pnpm": {
-			const root = readCommandOutput("pnpm", ["root", "-g"]);
-			if (root) return [root, dirname(root)];
-			const match = /^(.*[\\/]global[\\/][^\\/]+)[\\/]\.pnpm[\\/]/.exec(getPackageDir());
-			return match ? [match[1]] : [];
-		}
-		case "yarn": {
-			const dir = readCommandOutput("yarn", ["global", "dir"]);
-			return dir ? [dir, join(dir, "node_modules")] : [];
-		}
-		case "bun": {
-			const bunBin = readCommandOutput("bun", ["pm", "bin", "-g"]);
-			const roots = [join(homedir(), ".bun", "install", "global", "node_modules")];
-			if (bunBin) {
-				roots.push(join(dirname(bunBin), "install", "global", "node_modules"));
-			}
-			return roots;
-		}
-		case "bun-binary":
-		case "unknown":
-			return [];
-	}
-}
-
-function normalizeExistingPathForComparison(path: string, resolveSymlinks: boolean): string | undefined {
-	const resolvedPath = resolve(path);
-	if (!existsSync(resolvedPath)) {
-		return undefined;
-	}
-	let normalizedPath = resolvedPath;
-	if (resolveSymlinks) {
-		try {
-			normalizedPath = realpathSync(resolvedPath);
-		} catch {
-			return undefined;
-		}
-	}
-	if (process.platform === "win32") {
-		normalizedPath = normalizedPath.toLowerCase();
-	}
-	return normalizedPath;
-}
-
-function getPathComparisonCandidates(path: string): string[] {
-	return Array.from(
-		new Set(
-			[normalizeExistingPathForComparison(path, false), normalizeExistingPathForComparison(path, true)].filter(
-				(candidate): candidate is string => !!candidate,
-			),
-		),
-	);
-}
-
-function getEntrypointPackageDir(): string | undefined {
-	const entrypoint = process.argv[1];
-	if (!entrypoint) return undefined;
-	let dir = dirname(entrypoint);
-	while (dir !== dirname(dir)) {
-		if (existsSync(join(dir, "package.json"))) {
-			return dir;
-		}
-		dir = dirname(dir);
-	}
-	return undefined;
-}
-
-function isSelfUpdatePathWritable(): boolean {
-	const packageDir = getPackageDir();
-	try {
-		accessSync(packageDir, constants.W_OK);
-		accessSync(dirname(packageDir), constants.W_OK);
-		return true;
-	} catch {
-		return false;
-	}
-}
-
-function isManagedByGlobalPackageManager(method: InstallMethod, packageName: string, npmCommand?: string[]): boolean {
-	const packageDirs = [getPackageDir(), getEntrypointPackageDir()].filter((dir): dir is string => !!dir);
-	const packageDirCandidates = packageDirs.flatMap((dir) => getPathComparisonCandidates(dir));
-	return getGlobalPackageRoots(method, packageName, npmCommand).some((root) => {
-		return getPathComparisonCandidates(root).some((normalizedRoot) => {
-			const rootPrefix = normalizedRoot.endsWith(sep) ? normalizedRoot : `${normalizedRoot}${sep}`;
-			return packageDirCandidates.some((packageDir) => packageDir.startsWith(rootPrefix));
-		});
-	});
-}
-
-export function getSelfUpdateCommand(
-	packageName: string,
-	npmCommand?: string[],
-	updatePackageTarget: SelfUpdatePackageTarget = packageName,
-): SelfUpdateCommand | undefined {
-	const method = detectInstallMethod();
-	const command = getSelfUpdateCommandForMethod(method, packageName, updatePackageTarget, npmCommand);
-	if (!command || !isManagedByGlobalPackageManager(method, packageName, npmCommand) || !isSelfUpdatePathWritable()) {
-		return undefined;
-	}
-	return command;
-}
-
-/**
- * The self-update command configured by the user: `PI_SELF_UPDATE_COMMAND` (whitespace-separated
- * argv, no quoting), else the global `selfUpdateCommand` setting. Overrides install-method detection.
- */
-export function getConfiguredSelfUpdateArgv(setting: string[] | undefined): string[] | undefined {
-	const fromEnv = process.env.PI_SELF_UPDATE_COMMAND?.trim().split(/\s+/).filter(Boolean);
-	if (fromEnv?.length) return fromEnv;
-	return setting?.length ? setting : undefined;
-}
-
-/** Fill the `{packageName}`, `{version}`, and `{installSpec}` placeholders of a configured self-update command. */
-export function makeConfiguredSelfUpdateCommand(
-	argv: string[],
-	release: { packageName: string; version: string },
-): SelfUpdateCommand {
-	const values: Record<string, string> = {
-		packageName: release.packageName,
-		version: release.version,
-		installSpec: `${release.packageName}@${release.version}`,
-	};
-	const [command = "", ...args] = argv.map((arg) =>
-		arg.replace(/\{(packageName|version|installSpec)\}/g, (_, name: string) => values[name]),
-	);
-	return makeSelfUpdateCommandStep(command, args);
-}
-
-export function getSelfUpdateUnavailableInstruction(
-	packageName: string,
-	npmCommand?: string[],
-	updatePackageTarget: SelfUpdatePackageTarget = packageName,
-): string {
-	const method = detectInstallMethod();
-	const target = normalizeSelfUpdatePackageTarget(updatePackageTarget);
-	if (method === "bun-binary") {
-		return `Download from: https://github.com/earendil-works/pi/releases/latest`;
-	}
-	const command = getSelfUpdateCommandForMethod(method, packageName, target, npmCommand);
-	// Path-based detection also matches installs that only live under a package manager's directory,
-	// such as a wrapper under PNPM_HOME, so name the package manager only when it owns the install.
-	if (command && isManagedByGlobalPackageManager(method, packageName, npmCommand) && !isSelfUpdatePathWritable()) {
-		return `This installation is managed by a global ${method} install, but the install path is not writable. Update it yourself with: ${command.display}`;
-	}
-	return `Update ${target.installSpec} using the package manager, wrapper, or source checkout that provides this installation.`;
-}
-
-export function getUpdateInstruction(packageName: string): string {
-	const method = detectInstallMethod();
-	const command = getSelfUpdateCommandForMethod(method, packageName);
-	if (command) {
-		return `Run: ${command.display}`;
-	}
-	return getSelfUpdateUnavailableInstruction(packageName);
-}
 
 // =============================================================================
 // Package Asset Paths (shipped with executable)
@@ -417,7 +56,7 @@ export function findNodePackageDir(startDir: string): string {
 
 export function getPackageDir(): string {
 	// Allow override via environment variable (useful for Nix/Guix where store paths tokenize poorly)
-	const envDir = process.env.PI_PACKAGE_DIR;
+	const envDir = process.env.NEKOPAL_PACKAGE_DIR;
 	if (envDir) {
 		return normalizePath(envDir);
 	}
@@ -427,37 +66,6 @@ export function getPackageDir(): string {
 		return dirname(process.execPath);
 	}
 	return findNodePackageDir(__dirname);
-}
-
-/**
- * Get path to built-in themes directory (shipped with package)
- * - For Bun binary: theme/ next to executable
- * - For Node.js (dist/): dist/modes/interactive/theme/
- * - For source (src/): src/modes/interactive/theme/
- */
-export function getThemesDir(): string {
-	if (isBunBinary) {
-		return join(getPackageDir(), "theme");
-	}
-	// Theme is in modes/interactive/theme/ relative to src/ or dist/
-	const packageDir = getPackageDir();
-	const srcOrDist = existsSync(join(packageDir, "src")) ? "src" : "dist";
-	return join(packageDir, srcOrDist, "modes", "interactive", "theme");
-}
-
-/**
- * Get path to HTML export template directory (shipped with package)
- * - For Bun binary: export-html/ next to executable
- * - For Node.js (dist/): dist/core/export-html/
- * - For source (src/): src/core/export-html/
- */
-export function getExportTemplateDir(): string {
-	if (isBunBinary) {
-		return join(getPackageDir(), "export-html");
-	}
-	const packageDir = getPackageDir();
-	const srcOrDist = existsSync(join(packageDir, "src")) ? "src" : "dist";
-	return join(packageDir, srcOrDist, "core", "export-html");
 }
 
 /** Get path to package.json */
@@ -483,26 +91,6 @@ export function getExamplesPath(): string {
 /** Get path to CHANGELOG.md */
 export function getChangelogPath(): string {
 	return resolve(join(getPackageDir(), "CHANGELOG.md"));
-}
-
-/**
- * Get path to built-in interactive assets directory.
- * - For Bun binary: assets/ next to executable
- * - For Node.js (dist/): dist/modes/interactive/assets/
- * - For source (src/): src/modes/interactive/assets/
- */
-export function getInteractiveAssetsDir(): string {
-	if (isBunBinary) {
-		return join(getPackageDir(), "assets");
-	}
-	const packageDir = getPackageDir();
-	const srcOrDist = existsSync(join(packageDir, "src")) ? "src" : "dist";
-	return join(packageDir, srcOrDist, "modes", "interactive", "assets");
-}
-
-/** Get path to a bundled interactive asset */
-export function getBundledInteractiveAssetPath(name: string): string {
-	return join(getInteractiveAssetsDir(), name);
 }
 
 let quickJSWasmPath: string | undefined;
@@ -601,43 +189,29 @@ try {
 
 const piConfigName: string | undefined = pkg.piConfig?.name;
 export const PACKAGE_NAME: string = pkg.name || "@earendil-works/pi-coding-agent";
-export const APP_NAME: string = piConfigName || "pi";
-export const APP_TITLE: string = piConfigName ? APP_NAME : "π";
-export const CONFIG_DIR_NAME: string = pkg.piConfig?.configDir || ".pi";
+export const APP_NAME: string = piConfigName || "nekopal";
+export const APP_TITLE = "NekoPal";
+export const CONFIG_DIR_NAME: string = pkg.piConfig?.configDir || ".nekopal";
 export const VERSION: string = pkg.version || "0.0.0";
 
-// e.g., PI_CODING_AGENT_DIR or TAU_CODING_AGENT_DIR
-export const ENV_AGENT_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_DIR`;
-export const ENV_SESSION_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_SESSION_DIR`;
+export const ENV_AGENT_DIR = "NEKOPAL_HOME";
+export const ENV_SESSION_DIR = "NEKOPAL_SESSION_DIR";
 
 export function expandTildePath(path: string): string {
 	return normalizePath(path);
 }
 
-const DEFAULT_SHARE_VIEWER_URL = "https://pi.dev/session/";
-
-/** Get the share viewer URL for a gist ID. */
-export function getShareViewerUrl(gistId: string): string {
-	const baseUrl = process.env.PI_SHARE_VIEWER_URL || DEFAULT_SHARE_VIEWER_URL;
-	return `${baseUrl}#${gistId}`;
-}
-
 // =============================================================================
-// User Config Paths (~/.pi/agent/*)
+// User Config Paths (~/.nekopal/*)
 // =============================================================================
 
-/** Get the agent config directory (e.g., ~/.pi/agent/) */
+/** Get the agent config directory (e.g., ~/.nekopal/). */
 export function getAgentDir(): string {
 	const envDir = process.env[ENV_AGENT_DIR];
 	if (envDir) {
 		return expandTildePath(envDir);
 	}
-	return join(homedir(), CONFIG_DIR_NAME, "agent");
-}
-
-/** Get path to user's custom themes directory */
-export function getCustomThemesDir(): string {
-	return join(getAgentDir(), "themes");
+	return join(homedir(), CONFIG_DIR_NAME);
 }
 
 /** Get path to models.json */
@@ -650,9 +224,9 @@ export function getAuthPath(): string {
 	return join(getAgentDir(), "auth.json");
 }
 
-/** Get path to settings.json */
+/** Get path to settings.toml */
 export function getSettingsPath(): string {
-	return join(getAgentDir(), "settings.json");
+	return join(getAgentDir(), "settings.toml");
 }
 
 /** Get path to tools directory */

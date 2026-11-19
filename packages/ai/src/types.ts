@@ -1,21 +1,13 @@
 import type { TelemetrySpan } from "@earendil-works/pi-telemetry";
 import type { AnthropicOptions } from "./api/anthropic-messages.ts";
-import type { AzureOpenAIResponsesOptions } from "./api/azure-openai-responses.ts";
-import type { BedrockOptions } from "./api/bedrock-converse-stream.ts";
 import type { GoogleOptions } from "./api/google-generative-ai.ts";
-import type { GoogleVertexOptions } from "./api/google-vertex.ts";
-import type { MistralOptions } from "./api/mistral-conversations.ts";
 import type { OpenAICodexResponsesOptions } from "./api/openai-codex-responses.ts";
 import type { OpenAICompletionsOptions } from "./api/openai-completions.ts";
 import type { OpenAIResponsesOptions } from "./api/openai-responses.ts";
-import type { PiMessagesOptions } from "./api/pi-messages.ts";
 import type {
 	AnthropicMessagesCompat,
-	BedrockCompat,
-	MistralConversationsCompat,
 	OpenAICompletionsCompat,
 	OpenAIResponsesCompat,
-	SystemOneCompat,
 } from "./providers/compat-schema.ts";
 import type {
 	CacheRetention,
@@ -34,14 +26,11 @@ import type { ClientIdentity } from "./utils/identity.ts";
 export type {
 	AnthropicAllowedFallbackModel,
 	AnthropicMessagesCompat,
-	BedrockCompat,
 	ChatTemplateKwargValue,
-	MistralConversationsCompat,
 	OpenAICompletionsCompat,
 	OpenAIResponsesCompat,
 	OpenRouterRouting,
 	SessionAffinityFormat,
-	SystemOneCompat,
 	ThinkingTokenBudgetField,
 	VercelGatewayRouting,
 } from "./providers/compat-schema.ts";
@@ -63,15 +52,11 @@ export type { AssistantMessageEventStream } from "./utils/event-stream.ts";
 
 export type KnownApi =
 	| "openai-completions"
-	| "mistral-conversations"
 	| "openai-responses"
-	| "azure-openai-responses"
 	| "openai-codex-responses"
 	| "anthropic-messages"
-	| "bedrock-converse-stream"
 	| "google-generative-ai"
-	| "google-vertex"
-	| "pi-messages";
+	| "openai-decisions";
 
 export type Api = KnownApi | (string & {});
 
@@ -79,58 +64,11 @@ export type KnownImageApi = "openrouter-images";
 
 export type ImageApi = KnownImageApi | (string & {});
 
-export type KnownClassifierApi =
-	| "typesafe-system-one"
-	| "cloudflare-workers-ai-system-one"
-	| "llama-cpp-classify"
-	| "openai-decisions";
+export type KnownClassifierApi = "openai-decisions";
 
 export type ClassifierApi = KnownClassifierApi | (string & {});
 
-export type KnownProvider =
-	| "amazon-bedrock"
-	| "ant-ling"
-	| "anthropic"
-	| "google"
-	| "google-vertex"
-	| "openai"
-	| "azure"
-	| "openai-codex"
-	| "radius"
-	| "typesafe"
-	| "nvidia"
-	| "deepseek"
-	| "github-copilot"
-	| "xai"
-	| "groq"
-	| "cerebras"
-	| "openrouter"
-	| "vercel-ai-gateway"
-	| "zai"
-	| "zai-coding-cn"
-	| "mistral"
-	| "minimax"
-	| "minimax-cn"
-	| "moonshotai"
-	| "moonshotai-cn"
-	| "huggingface"
-	| "fireworks"
-	| "together"
-	| "baseten"
-	| "opencode"
-	| "opencode-go"
-	| "kimi-coding"
-	| "meta"
-	| "cloudflare-workers-ai"
-	| "cloudflare-ai-gateway"
-	| "qwen-token-plan"
-	| "qwen-token-plan-cn"
-	| "qwen-token-plan-individual"
-	| "qwen-token-plan-individual-cn"
-	| "xiaomi"
-	| "xiaomi-token-plan-cn"
-	| "xiaomi-token-plan-ams"
-	| "xiaomi-token-plan-sgp";
+export type KnownProvider = "anthropic" | "openai" | "openai-codex" | "xai";
 export type ProviderId = KnownProvider | string;
 
 export type ToolChoice = "auto" | "none";
@@ -300,12 +238,7 @@ export interface ApiOptionsMap {
 	"openai-completions": OpenAICompletionsOptions;
 	"openai-responses": OpenAIResponsesOptions;
 	"openai-codex-responses": OpenAICodexResponsesOptions;
-	"azure-openai-responses": AzureOpenAIResponsesOptions;
 	"google-generative-ai": GoogleOptions;
-	"google-vertex": GoogleVertexOptions;
-	"mistral-conversations": MistralOptions;
-	"bedrock-converse-stream": BedrockOptions;
-	"pi-messages": PiMessagesOptions;
 }
 
 /**
@@ -885,15 +818,11 @@ export interface Model<TApi extends Api> extends BaseModel<TApi> {
 	/** Compatibility overrides for OpenAI-compatible APIs. If not set, auto-detected from baseUrl. */
 	compat?: TApi extends "openai-completions"
 		? OpenAICompletionsCompat
-		: TApi extends "openai-responses" | "azure-openai-responses" | "openai-codex-responses"
+		: TApi extends "openai-responses" | "openai-codex-responses"
 			? OpenAIResponsesCompat
 			: TApi extends "anthropic-messages"
 				? AnthropicMessagesCompat
-				: TApi extends "bedrock-converse-stream"
-					? BedrockCompat
-					: TApi extends "mistral-conversations"
-						? MistralConversationsCompat
-						: never;
+				: never;
 }
 
 /** Image-generation model: usable with `generateImages()` only. */
@@ -907,8 +836,8 @@ export interface ImageModel<TApi extends ImageApi> extends BaseModel<TApi> {
 export interface ClassifierModel<TApi extends ClassifierApi> extends BaseModel<TApi> {
 	type: "classifier";
 	contextWindow: number;
-	/** Compatibility overrides for System One APIs. If not set, auto-detected from provider, baseUrl, and id. */
-	compat?: TApi extends "typesafe-system-one" | "cloudflare-workers-ai-system-one" ? SystemOneCompat : never;
+	/** Compatibility overrides for classifier APIs. If not set, auto-detected from provider, baseUrl, and id. */
+	compat?: Model<Api>["compat"];
 }
 
 /** Model shape for each model type. */

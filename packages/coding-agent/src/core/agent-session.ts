@@ -57,14 +57,12 @@ import {
 	resetApiProviders,
 	streamSimple,
 } from "@earendil-works/pi-ai/compat";
-import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { processImage } from "../utils/image-process.ts";
 import { sleep } from "../utils/sleep.ts";
 import { normalizeToolResultImages } from "../utils/tool-result-images.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
-import { generateBugReportSummary } from "./bug-report.ts";
 import type { CacheWarmer, CacheWarmingStatus } from "./cache-warmer.ts";
 import {
 	type CompactionPreparation,
@@ -80,8 +78,6 @@ import {
 	shouldCompact,
 } from "./compaction/index.ts";
 import { DEFAULT_THINKING_LEVEL, THINKING_LEVEL_OPTIONS } from "./defaults.ts";
-import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
-import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
 import {
 	type AgentActivityOutcome,
 	type BoundaryContextPreview,
@@ -270,7 +266,7 @@ export interface AgentSessionConfig {
 	cwd: string;
 	/** Models to cycle through with Ctrl+P (from --models flag) */
 	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
-	/** Resource loader for extensions, skills, prompts, themes, context files, and system prompt */
+	/** Resource loader for extensions, skills, prompts, context files, and system prompt */
 	resourceLoader: ResourceLoader;
 	/** SDK custom tools registered outside extensions */
 	customTools?: ToolDefinition[];
@@ -3457,19 +3453,15 @@ export class AgentSession {
 			return;
 		}
 
-		const { skillPaths, promptPaths, themePaths } = await this._extensionRunner.emitResourcesDiscover(
-			this._cwd,
-			reason,
-		);
+		const { skillPaths, promptPaths } = await this._extensionRunner.emitResourcesDiscover(this._cwd, reason);
 
-		if (skillPaths.length === 0 && promptPaths.length === 0 && themePaths.length === 0) {
+		if (skillPaths.length === 0 && promptPaths.length === 0) {
 			return;
 		}
 
 		const extensionPaths: ResourceExtensionPaths = {
 			skillPaths: this.buildExtensionResourcePaths(skillPaths),
 			promptPaths: this.buildExtensionResourcePaths(promptPaths),
-			themePaths: this.buildExtensionResourcePaths(themePaths),
 		};
 
 		this._resourceLoader.extendResources(extensionPaths);
@@ -4459,32 +4451,6 @@ export class AgentSession {
 	}
 
 	/**
-	 * Export session to HTML.
-	 * @param outputPath Optional output path (defaults to session directory)
-	 * @param options Optional export presentation settings
-	 * @returns Path to exported file
-	 */
-	async exportToHtml(outputPath?: string, options: { themeName?: string } = {}): Promise<string> {
-		const themeName = [options.themeName, this.settingsManager.getTheme()].find(
-			(candidate) => candidate !== undefined && getThemeByName(candidate) !== undefined,
-		);
-
-		// Create tool renderer if we have an extension runner (for custom tool HTML rendering)
-		const toolRenderer: ToolHtmlRenderer = createToolHtmlRenderer({
-			getToolRenderers: (name) =>
-				this._extensionRunner.resolveToolRenderers(name, () => this.getToolDefinition(name)),
-			theme,
-			cwd: this.sessionManager.getCwd(),
-		});
-
-		return await exportSessionToHtml(this.sessionManager, this.state, {
-			outputPath,
-			themeName,
-			toolRenderer,
-		});
-	}
-
-	/**
 	 * Export the current session branch to a JSONL file.
 	 * Writes the session header followed by all entries on the current branch path.
 	 * @param outputPath Target file path. If omitted, generates a timestamped file in cwd.
@@ -4492,26 +4458,6 @@ export class AgentSession {
 	 */
 	exportToJsonl(outputPath?: string): string {
 		return exportSessionToJsonl(this.sessionManager, outputPath);
-	}
-
-	/**
-	 * Ask the current model to describe what went wrong in this session for a bug report.
-	 * Used when the user declines to share the transcript itself.
-	 */
-	async summarizeForBugReport(options: { hint?: string; signal: AbortSignal }): Promise<string> {
-		const model = this.model;
-		if (!model) {
-			throw new Error("No model selected");
-		}
-		return generateBugReportSummary({
-			...(await this._getSummarizationRequestAuth(model, options.signal)),
-			messages: this.messages,
-			hint: options.hint,
-			signal: options.signal,
-			streamFn: this.agent.streamFunction,
-			retry: this.settingsManager.getRetrySettings(),
-			sessionId: this.sessionId,
-		});
 	}
 
 	// =========================================================================

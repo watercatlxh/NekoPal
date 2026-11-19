@@ -20,7 +20,6 @@ import {
 	createMcpAuthProvider as createAuthProvider,
 	listenForLoopbackSignIn,
 	type McpAuthProvider,
-	type McpClientMetadataDocuments,
 	type McpOAuthServerStore,
 	type McpOAuthSettings,
 	type McpOAuthState,
@@ -156,22 +155,16 @@ export class McpOAuthCredentialStore {
 	}
 }
 
-/** pi's Client ID Metadata Documents on pi.dev: `client.json` and `<callback ID>/client.json`. */
-const PI_CLIENT_METADATA_DOCUMENTS: McpClientMetadataDocuments = {
-	baseUrl: "https://pi.dev/oauth",
-	listsRedirectUrl: isClientMetadataDocumentCallback,
-};
+/** The app's client identity for sign-in and refresh. */
+const PI_CLIENT = { clientName: APP_NAME };
 
-/** pi's client identity for sign-in and refresh. */
-const PI_CLIENT = { clientName: APP_NAME, clientMetadataDocuments: PI_CLIENT_METADATA_DOCUMENTS };
-
-/** `settings` for pi-mcp: a rebranded build would show up as pi with pi's documents, so `auto` registers. */
+/** `settings` for pi-mcp: `auto` always registers dynamically, since NekoPal publishes no metadata documents. */
 function piSettings(settings: McpOAuthSettings): McpOAuthSettings {
 	const auto = (settings.clientRegistration ?? "auto") === "auto";
-	return auto && APP_NAME !== "pi" ? { ...settings, clientRegistration: "dcr" } : settings;
+	return auto ? { ...settings, clientRegistration: "dcr" } : settings;
 }
 
-/** pi-mcp's `createMcpAuthProvider` with pi's client identity. */
+/** pi-mcp's `createMcpAuthProvider` with the app's client identity. */
 export function createMcpAuthProvider(options: {
 	serverUrl: string;
 	store: McpOAuthServerStore;
@@ -218,7 +211,6 @@ export async function signInMcpServer(options: {
 		serverUrl,
 		store,
 		settings,
-		clientMetadataDocuments: PI_CLIENT_METADATA_DOCUMENTS,
 		renderPage: renderCallbackPage,
 	});
 	try {

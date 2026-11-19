@@ -1,7 +1,5 @@
 // Core session management
 
-export { type Args, parseArgs } from "./cli/args.ts";
-
 // Config paths
 export {
 	CONFIG_DIR_NAME,
@@ -311,19 +309,17 @@ export {
 	sessionEntryToContextMessages,
 	type ThinkingLevelChangeEntry,
 } from "./core/session-manager.ts";
+export { type NekoPalSettings, NekoPalSettingsSchema, NEKOPAL_DEFAULTS } from "./core/nekopal-settings.ts";
 export {
 	type CacheWarmingMode,
 	type CompactionModelOverride,
 	type CompactionSettings,
 	type DefaultProjectTrust,
-	type FullscreenExitOutput,
 	type ImageSettings,
 	type PackageSource,
-	type QuietStartup,
 	type RetrySettings,
 	SettingsManager,
 	type SettingsManagerCreateOptions,
-	type TuiMode,
 } from "./core/settings-manager.ts";
 // Skills
 export {
@@ -394,8 +390,10 @@ export {
 	type WriteToolInput,
 	type WriteToolOptions,
 	withFileMutationQueue,
+	setProtectedPaths,
+	checkProtectedPath,
+	type ProtectedPath,
 } from "./core/tools/index.ts";
-export { formatReadLineRange } from "./core/tools/render-utils.ts";
 export {
 	hasTrustRequiringProjectResources,
 	type ProjectTrustDecision,
@@ -417,83 +415,6 @@ export type { CodemodeStoreEntryData, CodemodeToolDetails } from "./extensions/c
 export type { LoadedMcpConfig, McpExposure, McpServerConfig, McpServerEntry } from "./extensions/mcp/config.ts";
 export { createMcpExtension, type McpExtensionOptions, type McpTransportFactory } from "./extensions/mcp/index.ts";
 export { createToolSearchExtension } from "./extensions/tool-search/index.ts";
-// Main entry point
-export { type MainOptions, main } from "./main.ts";
-// Run modes for programmatic SDK usage
-export {
-	InteractiveMode,
-	type InteractiveModeOptions,
-	type JsonAgentSessionEvent,
-	type ModelInfo,
-	type PrintModeOptions,
-	RpcClient,
-	type RpcClientOptions,
-	type RpcCommand,
-	type RpcEventListener,
-	type RpcExtensionUIRequest,
-	type RpcExtensionUIResponse,
-	type RpcResponse,
-	type RpcSessionState,
-	runPrintMode,
-	runRpcMode,
-} from "./modes/index.ts";
-// UI components for extensions
-export {
-	ArminComponent,
-	AssistantMessageComponent,
-	BashExecutionComponent,
-	BorderedLoader,
-	BranchSummaryMessageComponent,
-	CompactionSummaryMessageComponent,
-	CustomEditor,
-	type CustomEditorOptions,
-	CustomMessageComponent,
-	DynamicBorder,
-	ExtensionEditorComponent,
-	ExtensionInputComponent,
-	ExtensionSelectorComponent,
-	FooterComponent,
-	keyHint,
-	keyText,
-	LoginDialogComponent,
-	ModelSelectorComponent,
-	OAuthSelectorComponent,
-	type RenderDiffOptions,
-	rawKeyHint,
-	renderDiff,
-	SessionSelectorComponent,
-	type SettingsCallbacks,
-	type SettingsConfig,
-	SettingsSelectorComponent,
-	ShowImagesSelectorComponent,
-	SkillInvocationMessageComponent,
-	ThemeSelectorComponent,
-	ThinkingSelectorComponent,
-	ToolExecutionComponent,
-	type ToolExecutionOptions,
-	TreeSelectorComponent,
-	truncateToVisualLines,
-	UserMessageComponent,
-	UserMessageSelectorComponent,
-	type VisualTruncateResult,
-} from "./modes/interactive/components/index.ts";
-// Theme utilities for custom tools and extensions
-export {
-	getLanguageFromPath,
-	getMarkdownTheme,
-	getSelectListTheme,
-	getSettingsListTheme,
-	highlightCode,
-	initTheme,
-	Theme,
-	type ThemeAppearance,
-	type ThemeBg,
-	type ThemeColor,
-	type ThemeStyle,
-	type ThemeToken,
-} from "./modes/interactive/theme/theme.ts";
-// Clipboard utilities
-export { copyToClipboard } from "./utils/clipboard.ts";
 export { parseFrontmatter, stripFrontmatter } from "./utils/frontmatter.ts";
 export { convertToPng } from "./utils/image-convert.ts";
 export { formatDimensionNote, type ResizedImage, resizeImage } from "./utils/image-resize.ts";

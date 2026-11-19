@@ -3,25 +3,12 @@ import { PI_AI_VERSION } from "./version.ts";
 
 /**
  * The `User-Agent` sent to providers:
- * - `"detailed"`: `pi/<version> (<platform>; <runtime>/<runtime version>; <arch>)`, or `pi/<version> (browser)`
- *   outside Node.js and Bun.
- * - `"short"`: `pi`.
+ * - `"detailed"`: `nekopal/<version> (<platform>; <runtime>/<runtime version>; <arch>)`, or
+ *   `nekopal/<version> (browser)` outside Node.js and Bun.
+ * - `"short"`: `nekopal`.
  * - `{ custom }`: the given value.
  */
 export type UserAgentMode = "short" | "detailed" | { custom: string };
-
-/** Who requests are attributed to. `getAttributionHeaders()` maps the fields to each provider's headers. */
-export interface ClientAttribution {
-	/** App name: OpenRouter app title, NVIDIA invoke origin (first letter upper-cased), OpenCode client. */
-	name: string;
-	/** App URL: OpenRouter `HTTP-Referer`, the app's identity in OpenRouter's rankings, grouped by origin. */
-	url: string;
-	/** App categories, e.g. `["cli-agent"]`: OpenRouter `X-OpenRouter-Categories`, comma-separated. */
-	categories?: string[];
-}
-
-/** pi's attribution, used by pi-agent-core, pi-durable, and the coding agent. */
-export const PI_ATTRIBUTION: ClientAttribution = { name: "pi", url: "https://pi.dev", categories: ["cli-agent"] };
 
 /**
  * How pi-ai identifies the calling app to providers. Every field is optional; absent fields use pi-ai's defaults:
@@ -30,8 +17,6 @@ export const PI_ATTRIBUTION: ClientAttribution = { name: "pi", url: "https://pi.
 export interface ClientIdentity {
 	/** Default: `"detailed"`. */
 	userAgent?: UserAgentMode;
-	/** Provider attribution headers. Absent or `null`: none; `null` also turns off attribution set by a merged identity. */
-	attribution?: ClientAttribution | null;
 	/** Version in the detailed `User-Agent`. Default: the pi-ai version. */
 	version?: string;
 }
@@ -42,7 +27,6 @@ export interface ClientIdentityTarget {
 	readonly baseUrl: string;
 }
 
-const NVIDIA_NIM_HOST = "integrate.api.nvidia.com";
 const OPENCODE_HOST = "opencode.ai";
 
 /** Merge identities field by field; later sources win and undefined fields are skipped. */
@@ -52,7 +36,6 @@ export function mergeClientIdentity(...sources: (ClientIdentity | undefined)[]):
 		if (!source) continue;
 		merged = { ...merged };
 		if (source.userAgent !== undefined) merged.userAgent = source.userAgent;
-		if (source.attribution !== undefined) merged.attribution = source.attribution;
 		if (source.version !== undefined) merged.version = source.version;
 	}
 	return merged;
@@ -75,8 +58,8 @@ function runtimeDescription(): string | undefined {
 export function formatUserAgent(identity?: ClientIdentity): string {
 	const mode = identity?.userAgent ?? "detailed";
 	if (typeof mode === "object") return mode.custom;
-	if (mode === "short") return "pi";
-	const product = `pi/${getClientVersion(identity)}`;
+	if (mode === "short") return "nekopal";
+	const product = `nekopal/${getClientVersion(identity)}`;
 	const runtime = runtimeDescription();
 	return runtime ? `${product} (${process.platform}; ${runtime}; ${process.arch})` : `${product} (browser)`;
 }
@@ -89,38 +72,10 @@ function matchesHost(baseUrl: string, expectedHost: string): boolean {
 	}
 }
 
-function isOpenRouter(target: ClientIdentityTarget): boolean {
-	return target.provider === "openrouter" || target.baseUrl.includes("openrouter.ai");
-}
-
-function isNvidiaNim(target: ClientIdentityTarget): boolean {
-	return target.provider === "nvidia" || matchesHost(target.baseUrl, NVIDIA_NIM_HOST);
-}
-
 function isOpenCode(target: ClientIdentityTarget): boolean {
 	return (
 		target.provider === "opencode" || target.provider === "opencode-go" || matchesHost(target.baseUrl, OPENCODE_HOST)
 	);
-}
-
-/** Provider attribution headers of an identity for a request target. Empty when attribution is off. */
-export function getAttributionHeaders(target: ClientIdentityTarget, identity?: ClientIdentity): Record<string, string> {
-	const attribution = identity?.attribution;
-	if (!attribution) return {};
-	const { name, url, categories } = attribution;
-	if (isOpenRouter(target)) {
-		return {
-			"HTTP-Referer": url,
-			"X-OpenRouter-Title": name,
-			...(categories === undefined || categories.length === 0
-				? {}
-				: { "X-OpenRouter-Categories": categories.join(",") }),
-		};
-	}
-	// NVIDIA expects a capitalized origin, such as `Pi`.
-	if (isNvidiaNim(target)) return { "X-BILLING-INVOKE-ORIGIN": name.charAt(0).toUpperCase() + name.slice(1) };
-	if (isOpenCode(target)) return { "x-opencode-client": name };
-	return {};
 }
 
 /**
@@ -135,11 +90,12 @@ export function getOpenCodeSessionHeaders(
 }
 
 /**
- * Default headers an identity adds to a request: `User-Agent` and provider attribution. APIs apply them below model,
- * provider, and request headers, so configured headers override them and `null` request headers remove them.
+ * Default headers an identity adds to a request: `User-Agent`. APIs apply it below model, provider, and request
+ * headers, so configured headers override it and `null` request headers remove it.
  */
 export function getIdentityHeaders(target: ClientIdentityTarget, identity?: ClientIdentity): Record<string, string> {
-	return { "User-Agent": formatUserAgent(identity), ...getAttributionHeaders(target, identity) };
+	void target;
+	return { "User-Agent": formatUserAgent(identity) };
 }
 
 function isMutableModels(models: Models): models is MutableModels {

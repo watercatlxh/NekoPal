@@ -155,9 +155,10 @@ describe("Anthropic raw SSE parsing", () => {
 		};
 		events[4].data = JSON.stringify(delta);
 
-		const model = {
-			...getModel("openrouter", "anthropic/claude-haiku-4.5"),
+		const model: Model<"anthropic-messages"> = {
+			...getModel("anthropic", "claude-haiku-4-5"),
 			provider: "openrouter-work",
+			baseUrl: "https://openrouter.ai/api",
 		};
 		const result = await streamAnthropic(
 			model,
@@ -318,7 +319,7 @@ describe("Anthropic raw SSE parsing", () => {
 		} as unknown as Anthropic;
 
 		await streamAnthropic(
-			getModel("openrouter", "anthropic/claude-haiku-4.5"),
+			getModel("anthropic", "claude-haiku-4-5"),
 			normalizeContext({ messages: [{ role: "user", content: "Hello", timestamp: 1 }] }),
 			{ client, thinkingEnabled: false },
 		).result();

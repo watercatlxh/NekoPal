@@ -11,8 +11,8 @@ import {
 	normalizeToLF,
 } from "./edit-diff.ts";
 import { withFileMutationQueue } from "./file-mutation-queue.ts";
+import { checkProtectedPath } from "./protected-paths.ts";
 import { resolveToCwd } from "./path-utils.ts";
-import { type EditRenderState, editRenderers } from "./renderers/edit.ts";
 import { type TypeBoxAgentTool, wrapToolDefinition } from "./tool-definition-wrapper.ts";
 
 const replaceEditSchema = Type.Object(
@@ -138,7 +138,7 @@ function validateEditInput(input: EditToolInput): { path: string; edits: Edit[] 
 export function createEditToolDefinition(
 	cwd: string,
 	options?: EditToolOptions,
-): ToolDefinition<typeof editSchema, EditToolDetails | undefined, EditRenderState> {
+): ToolDefinition<typeof editSchema, EditToolDetails | undefined> {
 	const ops = options?.operations ?? defaultEditOperations;
 	return {
 		name: "edit",
@@ -154,6 +154,8 @@ export function createEditToolDefinition(
 		async execute(_toolCallId, input: EditToolInput, signal?: AbortSignal, _onUpdate?, ctx?: ExtensionContext) {
 			const { path, edits } = validateEditInput(input);
 			const absolutePath = resolveToCwd(path, ctx?.cwd || cwd);
+			const blocked = checkProtectedPath(absolutePath);
+			if (blocked) throw new Error(blocked);
 
 			return withFileMutationQueue(absolutePath, async () => {
 				// Do not reject from an abort event listener here: that would release the
@@ -212,7 +214,6 @@ export function createEditToolDefinition(
 				};
 			});
 		},
-		...editRenderers,
 	};
 }
 

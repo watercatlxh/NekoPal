@@ -18,12 +18,7 @@ type OAuthFlowLoaders = {
 	anthropic: () => OAuthAuth | Promise<OAuthAuth>;
 	openaiCodex: () => OAuthAuth | Promise<OAuthAuth>;
 	openaiChatGPT: () => OAuthAuth | Promise<OAuthAuth>;
-	githubCopilot: () => OAuthAuth | Promise<OAuthAuth>;
-	openrouter: () => OAuthAuth | Promise<OAuthAuth>;
-	kimiCoding: () => OAuthAuth | Promise<OAuthAuth>;
-	meta: () => OAuthAuth | Promise<OAuthAuth>;
 	xai: () => OAuthAuth | Promise<OAuthAuth>;
-	radius: (options: { name: string; gateway: string }) => OAuthAuth | Promise<OAuthAuth>;
 };
 
 let bundledLoaders: OAuthFlowLoaders | undefined;
@@ -48,36 +43,7 @@ export const loadOpenAIChatGPTOAuth = async (): Promise<OAuthAuth> => {
 	return ((await importOAuthModule("./openai-chatgpt.ts")) as { openaiChatGPTOAuth: OAuthAuth }).openaiChatGPTOAuth;
 };
 
-export const loadGitHubCopilotOAuth = async (): Promise<OAuthAuth> => {
-	if (bundledLoaders) return bundledLoaders.githubCopilot();
-	return ((await importOAuthModule("./github-copilot.ts")) as { githubCopilotOAuth: OAuthAuth }).githubCopilotOAuth;
-};
-
-export const loadOpenRouterOAuth = async (): Promise<OAuthAuth> => {
-	if (bundledLoaders) return bundledLoaders.openrouter();
-	return ((await importOAuthModule("./openrouter.ts")) as { openRouterOAuth: OAuthAuth }).openRouterOAuth;
-};
-
-export const loadKimiCodingOAuth = async (): Promise<OAuthAuth> => {
-	if (bundledLoaders) return bundledLoaders.kimiCoding();
-	return ((await importOAuthModule("./kimi-coding.ts")) as { kimiCodingOAuth: OAuthAuth }).kimiCodingOAuth;
-};
-
-export const loadMetaOAuth = async (): Promise<OAuthAuth> => {
-	if (bundledLoaders) return bundledLoaders.meta();
-	return ((await importOAuthModule("./meta.ts")) as { metaOAuth: OAuthAuth }).metaOAuth;
-};
-
 export const loadXaiOAuth = async (): Promise<OAuthAuth> => {
 	if (bundledLoaders) return bundledLoaders.xai();
 	return ((await importOAuthModule("./xai.ts")) as { xaiOAuth: OAuthAuth }).xaiOAuth;
-};
-
-export const loadRadiusOAuth = async (options: { name: string; gateway: string }): Promise<OAuthAuth> => {
-	if (bundledLoaders) return bundledLoaders.radius(options);
-	return (
-		(await importOAuthModule("./radius.ts")) as {
-			createRadiusOAuth: (input: { name: string; gateway: string }) => OAuthAuth;
-		}
-	).createRadiusOAuth(options);
 };

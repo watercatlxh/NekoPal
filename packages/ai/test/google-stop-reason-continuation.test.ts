@@ -2,7 +2,6 @@ import { FinishReason } from "@google/genai";
 import { describe, expect, it, vi } from "vitest";
 import { streamSimple as streamGoogleGenerativeAI } from "../src/api/google-generative-ai.ts";
 import { mapStopReason } from "../src/api/google-shared.ts";
-import { streamSimple as streamGoogleVertex } from "../src/api/google-vertex.ts";
 import type { Api, FetchFunction, Model } from "../src/types.ts";
 import { normalizeContext } from "../src/utils/transcript.ts";
 
@@ -51,13 +50,7 @@ describe("Google CONTINUATION finish reason", () => {
 			apiKey: "test-key",
 			fetch,
 		}).result();
-		const vertex = await streamGoogleVertex(createModel("google-vertex"), context, {
-			apiKey: "test-key",
-			fetch,
-		}).result();
-
-		expect(fetch).toHaveBeenCalledTimes(2);
+		expect(fetch).toHaveBeenCalledTimes(1);
 		expect(google.stopReason).toBe("length");
-		expect(vertex.stopReason).toBe("length");
 	});
 });

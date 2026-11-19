@@ -43,6 +43,7 @@ import type {
 	TranscriptContext,
 	Usage,
 } from "@earendil-works/pi-ai";
+import type { Static, TSchema } from "typebox";
 import type {
 	AutocompleteItem,
 	AutocompleteProvider,
@@ -51,20 +52,19 @@ import type {
 	EditorTheme,
 	Keybinding,
 	KeyId,
+	KeybindingsManager,
 	OverlayHandle,
 	OverlayOptions,
 	ProgramStatus,
+	Theme,
 	TUI,
-} from "@earendil-works/pi-tui";
-import type { Static, TSchema } from "typebox";
-import type { Theme } from "../../modes/interactive/theme/theme.ts";
+} from "./ui-types.ts";
 import type { BashResult } from "../bash-executor.ts";
 import type { CacheWarmingDecisionEvent, CacheWarmingDecisionEventResult } from "../cache-warmer.ts";
 import type { CompactionPreparation, CompactionResult } from "../compaction/index.ts";
 import type { EventBus } from "../event-bus.ts";
 import type { ExecOptions, ExecResult } from "../exec.ts";
 import type { ReadonlyFooterDataProvider } from "../footer-data-provider.ts";
-import type { KeybindingsManager } from "../keybindings.ts";
 import type { McpServerConfig, McpServerRegistry, RegisteredMcpServer } from "../mcp-servers.ts";
 import type { CustomMessage } from "../messages.ts";
 import type { ModelRegistry } from "../model-registry.ts";
@@ -103,10 +103,11 @@ import type {
 } from "../tools/index.ts";
 import type { ModelRoute, ModelRouteRequest, VirtualModelDefinition } from "../virtual-models.ts";
 
+export type { AppKeybinding } from "./ui-types.ts";
+export type { KeybindingsManager } from "./ui-types.ts";
 export type { ExecOptions, ExecResult } from "../exec.ts";
 export type { BuildSystemPromptOptions, NormalizedBuildSystemPromptOptions } from "../system-prompt.ts";
 export type { AgentToolResult, AgentToolUpdateCallback, ToolExecutionMode };
-export type { AppKeybinding, KeybindingsManager } from "../keybindings.ts";
 
 // ============================================================================
 // UI Context

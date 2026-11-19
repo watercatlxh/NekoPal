@@ -10,11 +10,8 @@ import {
 	type Provider,
 	type ProviderHeaders,
 } from "@earendil-works/pi-ai";
-import type { KeyId } from "@earendil-works/pi-tui";
-import { type Theme, theme } from "../../modes/interactive/theme/theme.ts";
 import type { CacheWarmingAction } from "../cache-warmer.ts";
 import type { ResourceDiagnostic } from "../diagnostics.ts";
-import type { KeybindingsConfig } from "../keybindings.ts";
 import type { ModelRegistry } from "../model-registry.ts";
 import type { ScopedModel } from "../model-resolver.ts";
 import type { SessionManager } from "../session-manager.ts";
@@ -25,6 +22,7 @@ import {
 	normalizeBuildSystemPromptOptions,
 } from "../system-prompt.ts";
 import type { VirtualModelDefinition } from "../virtual-models.ts";
+import { type KeyId, plainTheme, type Theme } from "./ui-types.ts";
 import type {
 	AgentBeforeSettleEvent,
 	BeforeAgentStartCustomEvent,
@@ -116,12 +114,13 @@ const RESERVED_KEYBINDINGS_FOR_EXTENSION_CONFLICTS = [
 	"tui.editor.deleteToLineEnd",
 ] as const;
 
+type KeybindingsConfig = Record<string, string | string[] | false | undefined>;
 type BuiltInKeyBindings = Partial<Record<KeyId, { keybinding: string; restrictOverride: boolean }>>;
 
 const buildBuiltinKeybindings = (resolvedKeybindings: KeybindingsConfig): BuiltInKeyBindings => {
 	const builtinKeybindings = {} as BuiltInKeyBindings;
 	for (const [keybinding, keys] of Object.entries(resolvedKeybindings)) {
-		if (keys === undefined) continue;
+		if (keys === undefined || keys === false) continue;
 		const keyList = Array.isArray(keys) ? keys : [keys];
 		const restrictOverride = (RESERVED_KEYBINDINGS_FOR_EXTENSION_CONFLICTS as readonly string[]).includes(keybinding);
 		for (const key of keyList) {
@@ -352,7 +351,7 @@ const noOpUIContext: ExtensionUIContext = {
 	setEditorComponent: () => {},
 	getEditorComponent: () => undefined,
 	get theme() {
-		return theme;
+		return plainTheme;
 	},
 	getAllThemes: () => [],
 	getTheme: () => undefined,

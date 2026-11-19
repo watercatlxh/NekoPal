@@ -14,7 +14,6 @@ import {
 } from "../../utils/shell.ts";
 import type { ExtensionContext, ToolDefinition } from "../extensions/types.ts";
 import { OutputAccumulator } from "./output-accumulator.ts";
-import { BASH_UPDATE_THROTTLE_MS, createShellRenderers } from "./renderers/bash.ts";
 import { type TypeBoxAgentTool, wrapToolDefinition } from "./tool-definition-wrapper.ts";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, type TruncationResult } from "./truncate.ts";
 
@@ -331,7 +330,7 @@ export function createShellToolDefinition(
 			const scheduleOutputUpdate = () => {
 				if (!onUpdate) return;
 				updateDirty = true;
-				const delay = BASH_UPDATE_THROTTLE_MS - (Date.now() - lastUpdateAt);
+				const delay = 100 - (Date.now() - lastUpdateAt);
 				if (delay <= 0) {
 					clearUpdateTimer();
 					emitOutputUpdate();
@@ -444,7 +443,6 @@ export function createShellToolDefinition(
 				clearUpdateTimer();
 			}
 		},
-		...createShellRenderers(config.prompt),
 	};
 }
 

@@ -1,10 +1,8 @@
 import type { ResponseStreamEvent } from "openai/resources/responses/responses.js";
 import { describe, expect, it } from "vitest";
 import { stream as streamAnthropic } from "../src/api/anthropic-messages.ts";
-import { stream as streamMistral } from "../src/api/mistral-conversations.ts";
 import { stream as streamOpenAICompletions } from "../src/api/openai-completions.ts";
 import { processResponsesStream } from "../src/api/openai-responses-shared.ts";
-import { stream as streamPiMessages } from "../src/api/pi-messages.ts";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "../src/providers/faux.ts";
 import type { AssistantMessage, AssistantMessageEvent, Model, TranscriptContext } from "../src/types.ts";
 import { AssistantMessageEventStream } from "../src/utils/event-stream.ts";
@@ -96,7 +94,7 @@ function* anthropicEvents(deltas: readonly string[]): Generator<string> {
 	yield sse({ type: "message_stop" }, "message_stop");
 }
 
-function* chatEvents(deltas: readonly string[], withIdEveryChunk: boolean): Generator<string> {
+function* chatEvents(deltas: readonly string[]): Generator<string> {
 	const base = { id: "chat_1", object: "chat.completion.chunk", created: 1, model: "test" };
 	const call = (fields: object) => ({
 		...base,
@@ -104,13 +102,7 @@ function* chatEvents(deltas: readonly string[], withIdEveryChunk: boolean): Gene
 	});
 	yield sse(call({ id: "call_1", type: "function", function: { name: "write", arguments: "" } }));
 	for (const delta of deltas) {
-		yield sse(
-			call(
-				withIdEveryChunk
-					? { id: "call_1", function: { name: "write", arguments: delta } }
-					: { function: { arguments: delta } },
-			),
-		);
+		yield sse(call({ function: { arguments: delta } }));
 	}
 	yield sse({
 		...base,
@@ -118,29 +110,6 @@ function* chatEvents(deltas: readonly string[], withIdEveryChunk: boolean): Gene
 		usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
 	});
 	yield "data: [DONE]\n\n";
-}
-
-function* piMessagesEvents(deltas: readonly string[], args: object): Generator<string> {
-	yield sse({ type: "start" });
-	yield sse({ type: "toolcall_start", contentIndex: 0, id: "call_1", toolName: "write" });
-	for (const delta of deltas) yield sse({ type: "toolcall_delta", contentIndex: 0, delta });
-	yield sse({
-		type: "toolcall_end",
-		contentIndex: 0,
-		toolCall: { type: "toolCall", id: "call_1", name: "write", arguments: args },
-	});
-	yield sse({
-		type: "done",
-		reason: "toolUse",
-		usage: {
-			input: 1,
-			output: 1,
-			cacheRead: 0,
-			cacheWrite: 0,
-			totalTokens: 2,
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-		},
-	});
 }
 
 function* responsesEvents(deltas: readonly string[], text: string): Generator<ResponseStreamEvent> {
@@ -223,7 +192,7 @@ const PATHS: readonly Path[] = [
 					baseUrl: "https://api.openai.com/v1",
 				},
 				context,
-				{ apiKey: "sk-test", fetch: sseFetch(() => chatEvents(deltas, false)) },
+				{ apiKey: "sk-test", fetch: sseFetch(() => chatEvents(deltas)) },
 			),
 	},
 	{
@@ -270,38 +239,6 @@ const PATHS: readonly Path[] = [
 			})();
 			return events;
 		},
-	},
-	{
-		name: "mistral-conversations",
-		stream: (deltas) =>
-			streamMistral(
-				{
-					...baseModel,
-					id: "devstral",
-					name: "d",
-					api: "mistral-conversations",
-					provider: "mistral",
-					baseUrl: "https://api.mistral.ai",
-				},
-				context,
-				{ apiKey: "test", fetch: sseFetch(() => chatEvents(deltas, true)) },
-			),
-	},
-	{
-		name: "pi-messages",
-		stream: (deltas, args) =>
-			streamPiMessages(
-				{
-					...baseModel,
-					id: "auto",
-					name: "a",
-					api: "pi-messages",
-					provider: "radius",
-					baseUrl: "https://example.test/v1",
-				},
-				context,
-				{ apiKey: "test", fetch: sseFetch(() => piMessagesEvents(deltas, args)) },
-			),
 	},
 	{
 		name: "faux",

@@ -18,6 +18,7 @@ export {
 	type EditToolOptions,
 } from "./edit.ts";
 export { withFileMutationQueue } from "./file-mutation-queue.ts";
+export { checkProtectedPath, type ProtectedPath, setProtectedPaths } from "./protected-paths.ts";
 export {
 	createFindTool,
 	createFindToolDefinition,

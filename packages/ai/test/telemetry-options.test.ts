@@ -1,16 +1,13 @@
 import { NOOP_TELEMETRY_CONTEXT, type TelemetrySpan } from "@earendil-works/pi-telemetry";
 import { describe, expect, it } from "vitest";
 import { buildBaseOptions } from "../src/api/simple-options.ts";
-import { generateImages } from "../src/images.ts";
-import { registerImagesApiProvider } from "../src/images-api-registry.ts";
 import { createModels, createProvider } from "../src/models.ts";
-import type { DeferredHandle, ImageModel, ImagesContext, Model, ProviderRequestOptions } from "../src/types.ts";
+import type { DeferredHandle, Model, ProviderRequestOptions } from "../src/types.ts";
 import { AssistantMessageEventStream } from "../src/utils/event-stream.ts";
 import { normalizeContext } from "../src/utils/transcript.ts";
 
 const telemetry: TelemetrySpan = NOOP_TELEMETRY_CONTEXT;
 const context = normalizeContext({ messages: [] });
-const imagesContext: ImagesContext = { input: [{ type: "text", text: "circle" }] };
 
 const model: Model<"telemetry-test"> = {
 	id: "model",
@@ -23,18 +20,6 @@ const model: Model<"telemetry-test"> = {
 	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 	contextWindow: 1000,
 	maxTokens: 100,
-};
-
-const imageModel: ImageModel<"telemetry-test-images"> = {
-	type: "image",
-	id: "image-model",
-	name: "Image Model",
-	api: "telemetry-test-images",
-	provider: "telemetry-image-provider",
-	baseUrl: "https://example.test",
-	input: ["text"],
-	output: ["image"],
-	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 };
 
 function completedStream(requestModel: Model<string>): AssistantMessageEventStream {
@@ -125,51 +110,5 @@ describe("ProviderRequestOptions.telemetry", () => {
 
 		expect(observed).toHaveLength(8);
 		expect(observed.every((value) => value === telemetry)).toBe(true);
-	});
-
-	it("survives direct and Models image dispatch", async () => {
-		const observed: Array<TelemetrySpan | undefined> = [];
-		registerImagesApiProvider({
-			api: imageModel.api,
-			generateImages: async (requestModel, _context, options) => {
-				observed.push(options?.telemetry);
-				return {
-					api: requestModel.api,
-					provider: requestModel.provider,
-					model: requestModel.id,
-					output: [],
-					stopReason: "stop",
-					timestamp: 0,
-				};
-			},
-		});
-		await generateImages(imageModel, imagesContext, { telemetry });
-
-		const models = createModels();
-		models.setProvider(
-			createProvider({
-				id: imageModel.provider,
-				auth: { apiKey: { name: "Test", resolve: async () => ({ auth: {} }) } },
-				models: [imageModel],
-				images: {
-					[imageModel.api]: {
-						generateImages: async (requestModel, _context, options) => {
-							observed.push(options?.telemetry);
-							return {
-								api: requestModel.api,
-								provider: requestModel.provider,
-								model: requestModel.id,
-								output: [],
-								stopReason: "stop",
-								timestamp: 0,
-							};
-						},
-					},
-				},
-			}),
-		);
-		await models.generateImages(imageModel, imagesContext, { telemetry });
-
-		expect(observed).toEqual([telemetry, telemetry]);
 	});
 });

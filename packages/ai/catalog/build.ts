@@ -12,7 +12,6 @@ import type {
 import type { ApiCompatDefaults, ChatModel, ProviderContext, ProviderDefinition } from "./define.ts";
 import { mergeThinking } from "./define.ts";
 import { applyClaudeFamilyRules } from "./families/anthropic.ts";
-import { applyDeepSeekCompatRules, applyDeepSeekFamilyRules } from "./families/deepseek.ts";
 import { applyOpenAiFamilyRules } from "./families/openai.ts";
 import { getEffortThinkingLevelMap } from "./reasoning.ts";
 import type { CatalogSources } from "./sources/index.ts";
@@ -55,7 +54,6 @@ function sendsNativeEffort(model: ChatModel): boolean {
 	}
 	if (
 		model.api === "openai-responses" ||
-		model.api === "azure-openai-responses" ||
 		model.api === "openai-codex-responses"
 	) {
 		return true;
@@ -138,11 +136,9 @@ export function buildCatalog(
 
 		for (const model of chat) {
 			applyCompatDefaults(model, definition.compat);
-			applyDeepSeekCompatRules(model);
 			applyModelsDevEffort(model, ctx.modelsDevSource(model));
 			applyOpenAiFamilyRules(model);
 			applyClaudeFamilyRules(model);
-			applyDeepSeekFamilyRules(model);
 		}
 		for (const model of chat) definition.finalize?.(model, ctx);
 		for (const model of chat) {
