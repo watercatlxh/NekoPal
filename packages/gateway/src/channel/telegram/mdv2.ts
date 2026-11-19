@@ -628,7 +628,7 @@ class UrlEmphasisScan {
 	private innermost(at: number, run: string): UrlOpener[] {
 		while (this.stack.length > 0 && !this.stack[this.stack.length - 1].alive) this.stack.pop();
 		const live = this.stack
-			.slice(-1 - CLOSER_LOOKBACK)
+			.slice(-CLOSER_LOOKBACK)
 			.reverse()
 			.filter((opener) => opener.alive);
 		const taken: UrlOpener[] = [];
@@ -810,7 +810,6 @@ function escapeBareBracket(ch: string, s: number, seg: string): string {
 }
 
 const TABLE_SEPARATOR_RE = /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*){1,}\|?\s*$/;
-const CONTRACTION_TAIL_RE = /(?:[stdm]|ll|re|ve)(?![A-Za-z])/iy;
 
 /** Whether `line` could plausibly be a table data row. */
 function isTableRow(line: string): boolean {
@@ -836,10 +835,9 @@ function isSpace(row: string, pos: number): boolean {
 /** `row[start:end]` is one backtick typed for an apostrophe inside an ASCII word (`don`t`). */
 function isApostrophe(row: string, start: number, end: number): boolean {
 	if (end - start !== 1 || start === 0) return false;
-	const previous = row[start - 1];
-	if (!/^[A-Za-z]$/.test(previous)) return false;
-	CONTRACTION_TAIL_RE.lastIndex = end;
-	return CONTRACTION_TAIL_RE.test(row);
+	if (!/^[A-Za-z]$/.test(row[start - 1])) return false;
+	// The letters an English contraction leaves after its apostrophe (don`t, it`s, we`ll, you`re).
+	return /^(?:[stdm]|ll|re|ve)(?![A-Za-z])/i.test(row.slice(end));
 }
 
 /**
@@ -1013,7 +1011,7 @@ export function toMarkdownV2(content: string): string {
 		return key;
 	};
 	const stashWrap = (open: string, close: string) => {
-		return (match: string, inner: string): string => stash(`${open}${escapeMdv2(inner)}${close}`);
+		return (_match: string, inner: string): string => stash(`${open}${escapeMdv2(inner)}${close}`);
 	};
 
 	// 0) Rewrite GFM-style pipe tables into Telegram-friendly row groups.

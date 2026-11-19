@@ -42,6 +42,19 @@ export interface SentHandle {
 	id: string;
 }
 
+/**
+ * A reply rendered progressively by the platform itself, such as QQ's `stream_messages`.
+ *
+ * `update` replaces the visible text; `finish` sends the final text and returns the message handle
+ * when the stream delivered it, or undefined when the stream degraded and the caller must send the
+ * reply normally.
+ */
+export interface ChannelStream {
+	update(text: string): Promise<void>;
+	finish(text: string): Promise<SentHandle | undefined>;
+	abort(): void;
+}
+
 export interface Adapter {
 	readonly name: ChannelName;
 	readonly caps: Caps;
@@ -58,5 +71,7 @@ export interface Adapter {
 	deleteMessage(chatId: string, handle: SentHandle): Promise<void>;
 	/** Send local files, as images where the platform supports them. */
 	sendFiles(chatId: string, paths: string[], replyTo?: string): Promise<void>;
+	/** Open a platform-rendered stream for one reply, or undefined when the channel cannot stream. */
+	openStream(chatId: string, replyTo?: string): ChannelStream | undefined;
 	stop(): Promise<void>;
 }

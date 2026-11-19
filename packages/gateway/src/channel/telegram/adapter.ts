@@ -228,6 +228,14 @@ class TelegramAdapter implements Adapter {
 		}
 	}
 
+	/**
+	 * Telegram has no platform-rendered stream: the reply layer edits a placeholder instead, so this
+	 * returns undefined and the placeholder path runs.
+	 */
+	openStream(): undefined {
+		return undefined;
+	}
+
 	async sendFiles(chatId: string, paths: string[], replyTo?: string): Promise<void> {
 		for (const path of paths) {
 			if (!existsSync(path) || !statSync(path).isFile()) throw new Error(`No such file: ${path}`);

@@ -1,7 +1,7 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { logError } from "../log.ts";
-import type { Adapter, SentHandle } from "../channel/types.ts";
+import type { Adapter, ChannelStream, SentHandle } from "../channel/types.ts";
 import type { MessageKey, Lang } from "../i18n/index.ts";
 import { t } from "../i18n/index.ts";
 
@@ -25,8 +25,9 @@ function formatElapsed(ms: number): string {
 /**
  * Turns session events into chat messages.
  *
- * The first output is a placeholder message that is edited in place into a progress line and then
- * into the reply text; when editing is unavailable (QQ) the reply is sent once, at the end.
+ * Two delivery paths: channels that can edit (Telegram) get a placeholder message edited into a
+ * progress line and then the reply text; channels that render a stream themselves (QQ) get the text
+ * pushed through `openStream`. When neither is available the reply is sent once, at the end.
  */
 export class ReplyController {
 	private readonly chat: ChatController;
@@ -38,6 +39,9 @@ export class ReplyController {
 	private text = "";
 	private timer: NodeJS.Timeout | undefined;
 	private stopped = false;
+	private stream: ChannelStream | undefined;
+	private streamText = "";
+	private streamed = false;
 
 	constructor(chat: ChatController) {
 		this.chat = chat;
@@ -76,11 +80,14 @@ export class ReplyController {
 	private async begin(): Promise<void> {
 		this.stopped = false;
 		this.text = "";
+		this.streamText = "";
+		this.streamed = false;
 		this.toolCount = 0;
 		this.lastTool = undefined;
 		this.startedAt = Date.now();
 		this.lastEditAt = 0;
-		if (!this.chat.adapter.caps.edit) return;
+		this.stream = this.chat.adapter.caps.stream ? this.chat.adapter.openStream(this.chat.chatId, this.chat.replyTo) : undefined;
+		if (this.stream || !this.chat.adapter.caps.edit) return;
 		this.placeholder = (await this.chat.send(PLACEHOLDER))[0];
 	}
 
@@ -93,9 +100,9 @@ export class ReplyController {
 		return parts.join(" · ");
 	}
 
-	/** Edit the placeholder at most once per interval; the timer flushes the newest text. */
+	/** Push the newest text at most once per interval, to the stream or the placeholder. */
 	private scheduleProgress(): void {
-		if (!this.placeholder || this.timer) return;
+		if ((!this.placeholder && !this.stream) || this.timer) return;
 		const wait = Math.max(0, this.lastEditAt + EDIT_INTERVAL_MS - Date.now());
 		this.timer = setTimeout(() => {
 			this.timer = undefined;
@@ -105,9 +112,16 @@ export class ReplyController {
 	}
 
 	private async flushProgress(): Promise<void> {
-		const placeholder = this.placeholder;
-		if (!placeholder || this.stopped) return;
+		if (this.stopped) return;
 		this.lastEditAt = Date.now();
+		if (this.stream) {
+			if (this.text.trim().length === 0) return;
+			this.streamed = true;
+			await this.stream.update(this.text);
+			return;
+		}
+		const placeholder = this.placeholder;
+		if (!placeholder) return;
 		const body = this.text.trim().length > 0 ? this.text.slice(-PREVIEW_CHARS) : this.progressLine();
 		try {
 			await this.chat.adapter.editText(this.chat.chatId, placeholder, body);
@@ -133,13 +147,20 @@ export class ReplyController {
 		await this.finalize(text, false);
 	}
 
-	/** Replace the placeholder with the final Markdown, or send it when the channel cannot edit. */
+	/** Finish the reply: end the stream, replace the placeholder, or send the Markdown. */
 	private async finalize(markdown: string, plain: boolean): Promise<void> {
 		this.stopped = true;
 		clearTimeout(this.timer);
 		this.timer = undefined;
+		const stream = this.stream;
+		this.stream = undefined;
 		const placeholder = this.placeholder;
 		this.placeholder = undefined;
+		if (stream) {
+			// The stream carries the reply only when it is still healthy and carries the same text.
+			if (!plain && this.streamed && (await stream.finish(markdown)) !== undefined) return;
+			stream.abort();
+		}
 		if (placeholder) await this.chat.deleteMessage(placeholder);
 		if (plain) {
 			await this.chat.sendPlain(markdown);
@@ -151,6 +172,8 @@ export class ReplyController {
 	private async settle(): Promise<void> {
 		clearTimeout(this.timer);
 		this.timer = undefined;
+		this.stream?.abort();
+		this.stream = undefined;
 		const placeholder = this.placeholder;
 		this.placeholder = undefined;
 		if (placeholder) await this.chat.deleteMessage(placeholder);
@@ -161,6 +184,8 @@ export class ReplyController {
 export interface ChatController {
 	readonly adapter: Adapter;
 	readonly chatId: string;
+	/** Message id of the inbound message, so a reply can take a passive slot. */
+	readonly replyTo: string | undefined;
 	readonly lang: Lang;
 	readonly statuses: Map<string, string>;
 	send(markdown: string): Promise<SentHandle[]>;

@@ -73,6 +73,8 @@ export class ChatContext implements ChatController {
 	readonly chatId: string;
 	readonly userId: string;
 	readonly statuses = new Map<string, string>();
+	/** Inbound message this chat is answering, for platforms whose replies must reference it. */
+	replyTo: string | undefined;
 	lang: Lang;
 	readonly workspace: string;
 	readonly agentDir: string;
@@ -347,11 +349,11 @@ export class ChatContext implements ChatController {
 	}
 
 	async send(markdown: string): Promise<SentHandle[]> {
-		return this.adapter.sendMarkdown(this.chatId, markdown);
+		return this.adapter.sendMarkdown(this.chatId, markdown, this.replyTo);
 	}
 
 	async sendPlain(text: string): Promise<void> {
-		await this.adapter.sendMarkdown(this.chatId, text);
+		await this.adapter.sendMarkdown(this.chatId, text, this.replyTo);
 	}
 
 	async deleteMessage(handle: SentHandle): Promise<void> {

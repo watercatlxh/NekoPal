@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { convertTableToBullets, toMarkdownV2 } from "../src/channel/telegram/mdv2.ts";
+import { convertTableToBullets, escapeMdv2, toMarkdownV2 } from "../src/channel/telegram/mdv2.ts";
 import { stripMdv2 } from "../src/channel/telegram/strip.ts";
 
 /**
@@ -83,6 +83,31 @@ function mdv2Error(text: string): string | undefined {
 	}
 	if (openMarks.length > 0) return `Can't find end of the entity starting with '${openMarks[openMarks.length - 1]}'`;
 	return undefined;
+}
+
+/**
+ * `url` reaches the chat whole (every mark escaped), or ends at a mark run that closes emphasis
+ * opened before it: its text up to that run shows contiguous and escaped, the run renders as the
+ * closer, and what follows the run is prose again.
+ */
+function urlSurvives(text: string, url: string, out: string): boolean {
+	if (out.includes(escapeMdv2(url))) return true;
+	const opened = text.slice(0, text.indexOf(url));
+	return [...url.matchAll(/[*~|]+/g)].some((run) => {
+		const start = run.index ?? 0;
+		// A backslash-escaped first mark is URL text: the closer starts after it.
+		const slashes = url.slice(0, start).length - url.slice(0, start).replace(/\\+$/, "").length;
+		const cut = start + (slashes % 2);
+		return (
+			opened.includes(run[0][0]) &&
+			cut < start + run[0].length &&
+			new RegExp(`${escapeRegExp(escapeMdv2(url.slice(0, cut)))}[*_~|]`).test(out)
+		);
+	});
+}
+
+function escapeRegExp(text: string): string {
+	return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /** Convert and assert the result is valid MarkdownV2. */
@@ -230,6 +255,38 @@ describe("toMarkdownV2", () => {
 		});
 	});
 
+	describe("no bare URL loses a character to formatting", () => {
+		// A mark inside a URL is URL text unless it closes emphasis opened outside the URL, so no
+		// URL character is ever dropped or turned into formatting.
+		const shapes = ["*", "**", "~~", "||"].flatMap((mark) =>
+			[".", ",", ";", ":", "!", "?", ")"].flatMap((punctuation) =>
+				["", mark].map((tail) => `a${mark}${punctuation}b${mark}c${tail}`),
+			),
+		);
+		const wrappers = [
+			"{}",
+			"Open {} now",
+			"*{}*",
+			"**{}**",
+			"~~{}~~",
+			"||{}||",
+			'"{}"',
+			"*Open {} now*",
+			"**see\n{}**",
+			"*x* {} *y*",
+			"{}, then **b**",
+		];
+
+		it.each(wrappers)("%j", (wrapper) => {
+			for (const shape of shapes) {
+				const url = `https://example.com/${shape}`;
+				const text = wrapper.replace("{}", url);
+				const out = convert(text);
+				expect(urlSurvives(text, url, out), `${text} -> ${out}`).toBe(true);
+			}
+		});
+	});
+
 	describe("plain text escaping", () => {
 		it("escapes currency punctuation", () => {
 			const out = convert("Price is $5.00!");
@@ -282,7 +339,7 @@ describe("toMarkdownV2", () => {
 	});
 
 	it("scales linearly over unmatched ** openers", () => {
-		const build = (lines: number) => `**a\n${"plain line here\n".repeat(lines)}${"> q\n" + "b** \n".repeat(lines)}`;
+		const build = (lines: number) => `**a\n${"plain line here\n".repeat(lines)}> q\n${"b** \n".repeat(lines)}`;
 		const small = build(64);
 		const large = build(64 * 8);
 		const best = (text: string): number => {

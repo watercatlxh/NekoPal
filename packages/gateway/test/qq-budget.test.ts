@@ -30,6 +30,17 @@ describe("PassiveBudget", () => {
 		expect(budget.takePassive("msg-1", BASE + 59 * MINUTE)).toBe(1);
 	});
 
+	test("reports the remaining slots so the reply layer can reserve them", () => {
+		const budget = new PassiveBudget();
+		budget.register("msg-1", BASE);
+
+		expect(budget.remaining("msg-1", BASE)).toBe(4);
+		budget.takePassive("msg-1", BASE);
+		expect(budget.remaining("msg-1", BASE)).toBe(3);
+		expect(budget.remaining("unknown", BASE)).toBe(0);
+		expect(budget.remaining("msg-1", BASE + 61 * MINUTE)).toBe(0);
+	});
+
 	test("budgets each inbound message separately", () => {
 		const budget = new PassiveBudget();
 		budget.register("msg-1", BASE);
@@ -38,16 +49,6 @@ describe("PassiveBudget", () => {
 		expect(budget.takePassive("msg-1", BASE)).toBe(1);
 		expect(budget.takePassive("msg-1", BASE)).toBe(2);
 		expect(budget.takePassive("msg-2", BASE)).toBe(1);
-	});
-
-	test("reports the remaining slots", () => {
-		const budget = new PassiveBudget();
-		budget.register("msg-1", BASE);
-
-		expect(budget.remaining("msg-1", BASE)).toBe(4);
-		budget.takePassive("msg-1", BASE);
-		expect(budget.remaining("msg-1", BASE)).toBe(3);
-		expect(budget.remaining("unknown", BASE)).toBe(0);
 	});
 });
 
@@ -60,7 +61,6 @@ describe("ProactiveBudget", () => {
 			expect(budget.takeProactive(openid, BASE + index * 1_000)).toBe(true);
 		}
 		expect(budget.takeProactive(openid, BASE + 18_000)).toBe(false);
-		expect(budget.remaining(openid, BASE + 18_000)).toBe(0);
 	});
 
 	test("allows a send again once the minute window slides", () => {

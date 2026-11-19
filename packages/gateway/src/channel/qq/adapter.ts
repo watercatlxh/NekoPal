@@ -13,6 +13,8 @@ import {
 	type ProactiveStorage,
 } from "./budget.ts";
 import { QqGateway, type QqLog, type QqLogError, type QqMessageEvent } from "./gateway.ts";
+import type { ChannelStream } from "../types.ts";
+import { QqStream, type StreamBudget } from "./stream.ts";
 import { stripMarkdown } from "./strip.ts";
 import { TokenProvider } from "./token.ts";
 
@@ -62,7 +64,8 @@ export function createQqAdapter(options: QqAdapterOptions): Adapter {
 	return new QqAdapter(options);
 }
 
-class QqAdapter implements Adapter {
+/** Exported so the daemon can read the proactive quota for `/settings`. */
+export class QqAdapter implements Adapter {
 	readonly name = "qq" as const;
 	readonly caps: Caps;
 
@@ -70,6 +73,7 @@ class QqAdapter implements Adapter {
 	private readonly passive = new PassiveBudget();
 	private readonly proactive: ProactiveBudget;
 	private readonly langFor: (chatId: string) => Lang;
+	private readonly streaming: boolean;
 	private gateway: QqGateway | undefined;
 	private api: QqApi | undefined;
 	private inboundTail: Promise<void> = Promise.resolve();
@@ -77,8 +81,9 @@ class QqAdapter implements Adapter {
 	constructor(options: QqAdapterOptions) {
 		this.options = options;
 		const qq = options.settingsManager.getNekoPal().channels?.qq;
-		// No in-place edits and no token-by-token streaming: a QQ reply is sent once, when it is final.
-		this.caps = { edit: false, stream: false, maxChars: MAX_CHARS };
+		// No in-place edits: QQ renders a reply either as a stream or as one final message.
+		this.streaming = qq?.stream ?? true;
+		this.caps = { edit: false, stream: this.streaming, maxChars: MAX_CHARS };
 		const defaultLang = options.settingsManager.getNekoPal().defaultLang ?? "en";
 		this.langFor = options.langFor ?? (() => defaultLang);
 		this.proactive = new ProactiveBudget({
@@ -119,6 +124,7 @@ class QqAdapter implements Adapter {
 
 	async sendMarkdown(chatId: string, markdown: string, replyTo?: string): Promise<SentHandle[]> {
 		if (markdown.trim() === "") return [];
+		const sourceId = replyTo === "" ? undefined : replyTo;
 		const { chunks, asDocument } = splitMarkdown(markdown, { maxChars: MAX_CHARS, maxChunks: MAX_CHUNKS });
 		if (asDocument) {
 			// Only a multi-megabyte reply gets here, and QQ has no document message to fall back on.
@@ -129,11 +135,32 @@ class QqAdapter implements Adapter {
 
 		const handles: SentHandle[] = [];
 		for (const chunk of chunks) {
-			const sent = await this.sendChunk(chatId, chunk, replyTo);
+			const sent = await this.sendChunk(chatId, chunk, sourceId);
 			if (sent === undefined) break;
 			handles.push(sent);
 		}
 		return handles;
+	}
+
+	/** A `stream_messages` reply, when `nekopal.channels.qq.stream` is on and a reply slot is free. */
+	openStream(chatId: string, replyTo?: string): ChannelStream | undefined {
+		const api = this.api;
+		if (api === undefined || !this.streaming) return undefined;
+		const sourceId = replyTo === "" ? undefined : replyTo;
+		const budget: StreamBudget = {
+			take: () => {
+				const targeting = this.takeSlot(chatId, sourceId);
+				if (targeting === undefined) return undefined;
+				const { msg_id, msg_seq } = targeting as { msg_id?: string; msg_seq?: number };
+				return { msgId: msg_id, msgSeq: msg_seq };
+			},
+		};
+		return QqStream.open({
+			api,
+			chatId,
+			budget,
+			logError: (message, error) => this.options.logError(message, error),
+		});
 	}
 
 	async editText(_chatId: string, _handle: SentHandle, _plain: string): Promise<void> {
@@ -145,14 +172,26 @@ class QqAdapter implements Adapter {
 	}
 
 	async sendFiles(chatId: string, paths: string[], replyTo?: string): Promise<void> {
+		const sourceId = replyTo === "" ? undefined : replyTo;
 		for (const path of paths) {
-			await this.sendFile(chatId, path, replyTo);
+			await this.sendFile(chatId, path, sourceId);
 		}
 	}
 
 	async stop(): Promise<void> {
 		await this.gateway?.stop();
 		this.gateway = undefined;
+	}
+
+	/** The `/settings` line for this user's proactive quota. */
+	quotaLine(openid: string, lang: Lang): string {
+		const counts = this.proactive.snapshot(openid, Date.now());
+		return t(lang, "settings.qqQuota", {
+			minute: counts.minute,
+			minuteLimit: counts.minuteLimit,
+			day: counts.day,
+			dayLimit: counts.dayLimit,
+		});
 	}
 
 	/** Serialize inbound handling so downloads cannot reorder the messages they belong to. */
@@ -168,9 +207,10 @@ class QqAdapter implements Adapter {
 		const attachments = await this.downloadAttachments(message);
 		let text = message.content;
 		if (message.transcript !== undefined && message.transcript !== "") {
-			// Voice messages carry their speech-to-text next to the attachment; keep it even when the
-			// audio itself failed to download.
-			if (attachments.length > 0) attachments[0].transcript = message.transcript;
+			// Voice messages carry their speech-to-text beside the audio; keep it even when the audio
+			// itself failed to download.
+			const voice = attachments.find((attachment) => attachment.mimeType.startsWith("audio/")) ?? attachments[0];
+			if (voice) voice.transcript = message.transcript;
 			else text = `${text}\n[voice transcript: ${message.transcript}]`.trim();
 		}
 
@@ -221,20 +261,13 @@ class QqAdapter implements Adapter {
 		const api = this.api;
 		if (!api) throw new Error("qq: adapter is not started");
 
-		const now = Date.now();
-		const msgSeq = replyTo === undefined ? undefined : this.passive.takePassive(replyTo, now);
-		const passive = msgSeq !== undefined && replyTo !== undefined;
-		if (!passive && !this.proactive.takeProactive(chatId, now)) {
+		const targeting = this.takeSlot(chatId, replyTo);
+		if (targeting === undefined) {
 			await this.sendNotice(chatId, t(this.langFor(chatId), "qq.limit"));
 			return undefined;
 		}
 
-		const payload: Record<string, unknown> = { msg_type: 2, markdown: { content } };
-		if (passive) {
-			payload.msg_id = replyTo;
-			payload.msg_seq = msgSeq;
-		}
-
+		const payload: Record<string, unknown> = { msg_type: 2, markdown: { content }, ...targeting };
 		try {
 			const response = await this.post(api, chatId, payload);
 			return { id: response.id ?? replyTo ?? "" };
@@ -249,27 +282,39 @@ class QqAdapter implements Adapter {
 					return undefined;
 				}
 			}
-
 			if (!(error instanceof QqError)) {
 				this.options.logError("qq send failed", error);
 				return undefined;
 			}
 
 			// A rejected markdown payload (a URL in plain text, a user who refuses proactive
-			// messages) is often accepted as plain text, so try that once before giving up.
-			const plain: Record<string, unknown> = { msg_type: 0, content: stripMarkdown(content) };
-			if (passive) {
-				plain.msg_id = replyTo;
-				plain.msg_seq = msgSeq;
-			}
+			// messages) is often accepted as plain text, so try that once before giving up. The
+			// rejected attempt did not reach the chat, so it keeps the same reply slot.
 			try {
-				const response = await this.post(api, chatId, plain);
+				const response = await this.post(api, chatId, {
+					msg_type: 0,
+					content: stripMarkdown(content),
+					...targeting,
+				});
 				return { id: response.id ?? replyTo ?? "" };
 			} catch (plainError) {
 				this.options.logError(`qq send failed: ${error.status} ${error.message}`, plainError);
 				return undefined;
 			}
 		}
+	}
+
+	/**
+	 * Claim the fields that address one message: `msg_id`/`msg_seq` from the source message's
+	 * passive window, else a proactive send. Undefined when both budgets are spent.
+	 */
+	private takeSlot(chatId: string, replyTo?: string): Record<string, unknown> | undefined {
+		const now = Date.now();
+		if (replyTo !== undefined) {
+			const msgSeq = this.passive.takePassive(replyTo, now);
+			if (msgSeq !== undefined) return { msg_id: replyTo, msg_seq: msgSeq };
+		}
+		return this.proactive.takeProactive(chatId, now) ? {} : undefined;
 	}
 
 	/** A plain notice such as the reply-limit warning; it bypasses the budget so it always lands. */
@@ -307,20 +352,17 @@ class QqAdapter implements Adapter {
 			throw new Error(`qq: upload of ${name} returned no file_info`);
 		}
 
-		const now = Date.now();
-		const msgSeq = replyTo === undefined ? undefined : this.passive.takePassive(replyTo, now);
-		const passive = msgSeq !== undefined && replyTo !== undefined;
-		if (!passive && !this.proactive.takeProactive(chatId, now)) {
+		const targeting = this.takeSlot(chatId, replyTo);
+		if (targeting === undefined) {
 			await this.sendNotice(chatId, t(this.langFor(chatId), "qq.limit"));
 			return;
 		}
 
-		const message: Record<string, unknown> = { msg_type: 7, media: { file_info: uploaded.file_info } };
-		if (passive) {
-			message.msg_id = replyTo;
-			message.msg_seq = msgSeq;
-		}
-		await api.call("POST", `/v2/users/${chatId}/messages`, message);
+		await api.call("POST", `/v2/users/${chatId}/messages`, {
+			msg_type: 7,
+			media: { file_info: uploaded.file_info },
+			...targeting,
+		});
 	}
 
 	private post(api: QqApi, chatId: string, payload: Record<string, unknown>): Promise<{ id?: string }> {

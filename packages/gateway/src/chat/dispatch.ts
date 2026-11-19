@@ -87,6 +87,8 @@ export class Dispatcher {
 		}
 
 		await chat.enqueue(async () => {
+			// Replies to this turn reference the inbound message, so QQ can use passive slots.
+			chat.replyTo = message.messageId;
 			const images = message.attachments
 				.filter((attachment) => attachment.kind === "image")
 				.map((attachment) => ({

@@ -45,10 +45,6 @@ export class QqApi {
 		this.timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
 	}
 
-	get base(): string {
-		return this.baseUrl;
-	}
-
 	/** A valid access token, for the gateway's identify and resume frames. */
 	token(): Promise<string> {
 		return this.tokens.get();

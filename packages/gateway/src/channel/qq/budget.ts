@@ -51,11 +51,14 @@ export class PassiveBudget {
 		return entry.used;
 	}
 
-	/** Passive replies still available for `messageId`; 0 once the window closed or filled up. */
+	/**
+	 * Passive replies still available for `messageId`: 0 once the window closed or filled up.
+	 *
+	 * The reply layer reserves slots here so a progress notice cannot eat the answer's budget.
+	 */
 	remaining(messageId: string, now: number): number {
 		const entry = this.entries.get(messageId);
-		if (!entry) return 0;
-		if (now - entry.receivedAt >= this.windowMs) return 0;
+		if (!entry || now - entry.receivedAt >= this.windowMs) return 0;
 		return Math.max(0, this.limit - entry.used);
 	}
 
@@ -131,12 +134,23 @@ export class ProactiveBudget {
 		return true;
 	}
 
-	/** Proactive sends still allowed for `openid`: the tighter of the minute and day caps. */
+	/** Sends still allowed for `openid`: the tighter of the minute and day caps. */
 	remaining(openid: string, now: number): number {
 		this.rollDay(now);
 		const minute = this.perMinute - this.recentSince(openid, now).length;
 		const day = this.perDay - (this.counts.sentToday[openid] ?? 0);
 		return Math.max(0, Math.min(minute, day));
+	}
+
+	/** Counters as the settings panel shows them. */
+	snapshot(openid: string, now: number): { minute: number; minuteLimit: number; day: number; dayLimit: number } {
+		this.rollDay(now);
+		return {
+			minute: this.recentSince(openid, now).length,
+			minuteLimit: this.perMinute,
+			day: this.counts.sentToday[openid] ?? 0,
+			dayLimit: this.perDay,
+		};
 	}
 
 	/** Timestamps of the sends inside the trailing minute, with older ones dropped. */
