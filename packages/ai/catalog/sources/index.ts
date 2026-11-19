@@ -1,5 +1,10 @@
 import type { Model } from "../../src/types.ts";
-import { type ModelsDevDecisionMetadata, type ModelsDevV2Catalog, MODELS_DEV_DECISIONS_URL, MODELS_DEV_URL } from "./models-dev.ts";
+import {
+	MODELS_DEV_DECISIONS_URL,
+	MODELS_DEV_URL,
+	type ModelsDevDecisionMetadata,
+	type ModelsDevV2Catalog,
+} from "./models-dev.ts";
 
 export type { ModelsDevDecisionMetadata, ModelsDevV2Catalog };
 

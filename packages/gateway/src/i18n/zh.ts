@@ -33,7 +33,8 @@ export const messages: Record<keyof typeof en, string> = {
 	"login.choose": "登录哪个提供商？\n{{list}}",
 	"login.openUrl": "🔐 打开链接登录：\n{{url}}",
 	"login.deviceCode": "🔐 打开 {{url}}，输入验证码 {{code}}",
-	"login.pasteWarning": "完成后把最终跳转 URL 或页面显示的 code 粘贴到这里（10 分钟内；/cancel 取消）。\n⚠ 这条消息会留在聊天记录里。",
+	"login.pasteWarning":
+		"完成后把最终跳转 URL 或页面显示的 code 粘贴到这里（10 分钟内；/cancel 取消）。\n⚠ 这条消息会留在聊天记录里。",
 	"login.done": "✅ 已登录 {{provider}}",
 	"login.cancelled": "登录已取消",
 	"login.timeout": "登录超时",
@@ -75,6 +76,7 @@ export const messages: Record<keyof typeof en, string> = {
 	"help.header": "NekoPal 命令",
 	"login.usage": "用法：/login <{{providers}}>",
 	"login.unknown": "未知提供商 {{provider}}",
-	"daemon.noChannel": "没有启用任何通道：请在 settings.toml 中设置 [nekopal.channels.telegram] enabled = true 并填入 botToken，或设置 [nekopal.channels.qq] 的 appId 与 appSecret。",
+	"daemon.noChannel":
+		"没有启用任何通道：请在 settings.toml 中设置 [nekopal.channels.telegram] enabled = true 并填入 botToken，或设置 [nekopal.channels.qq] 的 appId 与 appSecret。",
 	"daemon.args": "nekopal 不接受命令行参数；请改用 {{settings}}。",
 };

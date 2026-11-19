@@ -205,7 +205,6 @@ export {
 	defineTool,
 	discoverAndLoadExtensions,
 	ExtensionRunner,
-	noOpUIContext,
 	isBashToolResult,
 	isEditToolResult,
 	isFindToolResult,
@@ -215,6 +214,7 @@ export {
 	isReadToolResult,
 	isToolCallEventType,
 	isWriteToolResult,
+	noOpUIContext,
 	wrapRegisteredTool,
 	wrapRegisteredTools,
 } from "./core/extensions/index.ts";
@@ -224,10 +224,10 @@ export type { RegisteredMcpServer } from "./core/mcp-servers.ts";
 export { convertToLlm } from "./core/messages.ts";
 export { ModelRegistry } from "./core/model-registry.ts";
 export {
-	type ModelScopeDiagnostic,
 	findExactModelReferenceMatch,
-	type ModelReferenceResult,
 	type ModelReferenceRequest,
+	type ModelReferenceResult,
+	type ModelScopeDiagnostic,
 	type ResolveCliModelResult,
 	type ResolveModelScopeResult,
 	resolveCliModel,
@@ -242,6 +242,7 @@ export {
 	ModelRuntime,
 	type ModelRuntimeAuthOverrides,
 } from "./core/model-runtime.ts";
+export { NEKOPAL_DEFAULTS, type NekoPalSettings, NekoPalSettingsSchema } from "./core/nekopal-settings.ts";
 export type {
 	PackageInstallFailure,
 	PackageManager,
@@ -252,6 +253,7 @@ export type {
 	ResolvedResource,
 } from "./core/package-manager.ts";
 export { DefaultPackageManager } from "./core/package-manager.ts";
+export { resolveConfigValue, resolveConfigValueOrThrow } from "./core/resolve-config-value.ts";
 export type { ResourceCollision, ResourceDiagnostic, ResourceLoader } from "./core/resource-loader.ts";
 export { DefaultResourceLoader, loadProjectContextFiles } from "./core/resource-loader.ts";
 // SDK for programmatic usage
@@ -314,9 +316,6 @@ export {
 	sessionEntryToContextMessages,
 	type ThinkingLevelChangeEntry,
 } from "./core/session-manager.ts";
-export { type NekoPalSettings, NekoPalSettingsSchema, NEKOPAL_DEFAULTS } from "./core/nekopal-settings.ts";
-export { SettingsSchema } from "./core/settings-schema.ts";
-export { resolveConfigValue, resolveConfigValueOrThrow } from "./core/resolve-config-value.ts";
 export {
 	type CacheWarmingMode,
 	type CompactionModelOverride,
@@ -328,6 +327,7 @@ export {
 	SettingsManager,
 	type SettingsManagerCreateOptions,
 } from "./core/settings-manager.ts";
+export { SettingsSchema } from "./core/settings-schema.ts";
 // Skills
 export {
 	formatSkillsForPrompt,
@@ -348,6 +348,7 @@ export {
 	type BashToolDetails,
 	type BashToolInput,
 	type BashToolOptions,
+	checkProtectedPath,
 	createBashToolDefinition,
 	createEditToolDefinition,
 	createFindToolDefinition,
@@ -383,10 +384,12 @@ export {
 	type PowerShellToolDetails,
 	type PowerShellToolInput,
 	type PowerShellToolOptions,
+	type ProtectedPath,
 	type ReadOperations,
 	type ReadToolDetails,
 	type ReadToolInput,
 	type ReadToolOptions,
+	setProtectedPaths,
 	type ToolsOptions,
 	type TruncationOptions,
 	type TruncationResult,
@@ -397,9 +400,6 @@ export {
 	type WriteToolInput,
 	type WriteToolOptions,
 	withFileMutationQueue,
-	setProtectedPaths,
-	checkProtectedPath,
-	type ProtectedPath,
 } from "./core/tools/index.ts";
 export {
 	hasTrustRequiringProjectResources,

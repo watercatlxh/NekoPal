@@ -23,12 +23,7 @@ import {
 	toLlmContent,
 } from "@earendil-works/pi-mcp";
 import type { TSchema } from "typebox";
-import type {
-	ToolAnnotations,
-	ToolDefinition,
-	ToolExposure,
-	ToolNamespace,
-} from "../../core/extensions/types.ts";
+import type { ToolAnnotations, ToolDefinition, ToolExposure, ToolNamespace } from "../../core/extensions/types.ts";
 import { READ_MCP_RESOURCE_TOOL } from "../../core/mcp-servers.ts";
 import { formatSize } from "../../core/tools/truncate.ts";
 import { writeOutputFile } from "../../utils/output-files.ts";

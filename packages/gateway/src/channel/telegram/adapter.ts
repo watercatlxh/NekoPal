@@ -2,11 +2,10 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, extname } from "node:path";
 import type { SettingsManager } from "@earendil-works/pi-coding-agent";
 import { resolveConfigValueOrThrow } from "@earendil-works/pi-coding-agent";
-import type { Adapter, Caps, Inbound, SentHandle } from "../types.ts";
-import type { Lang } from "../types.ts";
-import { splitMarkdown } from "../split.ts";
 import { t } from "../../i18n/index.ts";
-import type { LogFn, LogErrorFn } from "../../log.ts";
+import type { LogErrorFn, LogFn } from "../../log.ts";
+import { splitMarkdown } from "../split.ts";
+import type { Adapter, Caps, Inbound, Lang, SentHandle } from "../types.ts";
 import { TelegramApi, TelegramError, type TelegramMessage } from "./api.ts";
 import { toMarkdownV2 } from "./mdv2.ts";
 import { stripMdv2 } from "./strip.ts";
@@ -17,14 +16,26 @@ const SOURCE_CHARS = 3500;
 const MAX_CHUNKS = 8;
 /** Telegram's hard limit for one message. */
 const MESSAGE_LIMIT = 4096;
-const PHOTO_EXTENSIONS: Record<string, true> = { ".png": true, ".jpg": true, ".jpeg": true, ".webp": true, ".gif": true };
+const PHOTO_EXTENSIONS: Record<string, true> = {
+	".png": true,
+	".jpg": true,
+	".jpeg": true,
+	".webp": true,
+	".gif": true,
+};
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 const MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024;
+
+function formatSize(bytes: number): string {
+	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 export interface TelegramAdapterOptions {
 	settingsManager: SettingsManager;
 	log: LogFn;
 	logError: LogErrorFn;
+	/** The command list shown by Telegram's `/` menu; registered once at startup. */
+	commands?: ReadonlyArray<{ command: string; description: string }>;
 	/** Called after each processed update, so the offset survives a restart. */
 	onOffset?(offset: number): void;
 	offset?: number;
@@ -58,7 +69,19 @@ class TelegramAdapter implements Adapter {
 	async start(onInbound: (message: Inbound) => void): Promise<void> {
 		this.running = true;
 		this.controller = new AbortController();
+		await this.registerCommands();
 		void this.loop(onInbound);
+	}
+
+	/** Publish the command menu; a failure only costs the menu, not the channel. */
+	private async registerCommands(): Promise<void> {
+		const commands = this.options.commands;
+		if (!commands || commands.length === 0) return;
+		try {
+			await this.api.call("setMyCommands", { commands });
+		} catch (error) {
+			this.options.logError("telegram: could not register the command menu", error);
+		}
 	}
 
 	async stop(): Promise<void> {
@@ -83,20 +106,25 @@ class TelegramAdapter implements Adapter {
 		}
 	}
 
-	private async handleUpdate(update: { message?: TelegramMessage }, onInbound: (message: Inbound) => void): Promise<void> {
+	private async handleUpdate(
+		update: { message?: TelegramMessage },
+		onInbound: (message: Inbound) => void,
+	): Promise<void> {
 		const message = update.message;
 		if (!message || message.chat.type !== "private" || !message.from) return;
 		const text = message.text ?? message.caption ?? "";
+		const chatId = String(message.chat.id);
 		const attachments: Inbound["attachments"] = [];
 
 		const photo = message.photo?.[message.photo.length - 1];
 		if (photo) {
-			const image = await this.fetchAttachment(photo.file_id, photo.file_size, "image/jpeg", "photo.jpg");
+			const image = await this.fetchAttachment(chatId, photo.file_id, photo.file_size, "image/jpeg", "photo.jpg");
 			if (image) attachments.push(image);
 		}
 		const document = message.document;
 		if (document) {
 			const file = await this.fetchAttachment(
+				chatId,
 				document.file_id,
 				document.file_size,
 				document.mime_type ?? "application/octet-stream",
@@ -108,6 +136,7 @@ class TelegramAdapter implements Adapter {
 			if (!audio) continue;
 			const isVoice = audio === message.voice;
 			const file = await this.fetchAttachment(
+				chatId,
 				audio.file_id,
 				audio.file_size,
 				audio.mime_type ?? "application/octet-stream",
@@ -118,7 +147,7 @@ class TelegramAdapter implements Adapter {
 
 		onInbound({
 			channel: "telegram",
-			chatId: String(message.chat.id),
+			chatId,
 			userId: String(message.from.id),
 			messageId: String(message.message_id),
 			text,
@@ -128,13 +157,14 @@ class TelegramAdapter implements Adapter {
 	}
 
 	private async fetchAttachment(
+		chatId: string,
 		fileId: string,
 		size: number | undefined,
 		mimeType: string,
 		fileName: string,
 	): Promise<Inbound["attachments"][number] | undefined> {
 		if (size !== undefined && size > MAX_DOWNLOAD_BYTES) {
-			await this.sendMarkdown(String(fileId), t(this.lang, "file.tooLarge", { name: fileName, size: size }));
+			await this.sendMarkdown(chatId, t(this.lang, "file.tooLarge", { name: fileName, size: formatSize(size) }));
 			return undefined;
 		}
 		try {
@@ -242,7 +272,7 @@ class TelegramAdapter implements Adapter {
 			const size = statSync(path).size;
 			const name = basename(path);
 			if (size > MAX_UPLOAD_BYTES) {
-				await this.sendMarkdown(chatId, t(this.lang, "file.tooLarge", { name, size }));
+				await this.sendMarkdown(chatId, t(this.lang, "file.tooLarge", { name, size: formatSize(size) }));
 				continue;
 			}
 			const form = new FormData();
@@ -268,5 +298,9 @@ export function createTelegramAdapter(options: TelegramAdapterOptions): Adapter 
 		options.logError("telegram botToken resolved to empty (check TELEGRAM_BOT_TOKEN)", error);
 		throw error;
 	}
-	return new TelegramAdapter(options, new TelegramApi(token), options.settingsManager.getNekoPal().defaultLang ?? "en");
+	return new TelegramAdapter(
+		options,
+		new TelegramApi(token),
+		options.settingsManager.getNekoPal().defaultLang ?? "en",
+	);
 }

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { normalizeContext } from "@earendil-works/pi-ai";
 import type { AnthropicMessagesCompat, Api, Model, OpenAICompletionsCompat } from "@earendil-works/pi-ai/compat";
-import { getApiProvider, getModels, getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
+import { getApiProvider, getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import type { ModelsJsonProvider } from "../src/core/model-config.ts";
@@ -192,7 +192,11 @@ describe("ModelRegistry", () => {
 				// baseUrl-only for anthropic
 				anthropic: overrideConfig("https://anthropic-proxy.example.com/v1"),
 				// Add custom model for openai (merged with built-ins)
-				openai: providerConfig("https://openai-proxy.example.com/v1", [{ id: "openai-custom" }], "openai-completions"),
+				openai: providerConfig(
+					"https://openai-proxy.example.com/v1",
+					[{ id: "openai-custom" }],
+					"openai-completions",
+				),
 			});
 
 			const registry = await createModelRegistry(authStorage, modelsJsonPath);
@@ -661,9 +665,7 @@ describe("ModelRegistry", () => {
 			const models = getModelsForProvider(registry, "anthropic");
 
 			expect(models.some((m) => m.id === "claude-custom")).toBe(true);
-			expect(models.some((m) => m.id === "claude-sonnet-4-5" && m.name === "Overridden Built-in Sonnet")).toBe(
-				true,
-			);
+			expect(models.some((m) => m.id === "claude-sonnet-4-5" && m.name === "Overridden Built-in Sonnet")).toBe(true);
 		});
 
 		test("refresh() reloads merged custom models from disk", async () => {
@@ -1136,9 +1138,7 @@ describe("ModelRegistry", () => {
 			});
 
 			const registry = await createModelRegistry(authStorage, modelsJsonPath);
-			const customName = getModelsForProvider(registry, "anthropic").find(
-				(m) => m.id === "claude-sonnet-4-5",
-			)?.name;
+			const customName = getModelsForProvider(registry, "anthropic").find((m) => m.id === "claude-sonnet-4-5")?.name;
 			expect(customName).toBe("Custom Name");
 
 			// Remove override and refresh

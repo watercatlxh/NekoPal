@@ -733,10 +733,6 @@ export class SettingsManager {
 		return drained;
 	}
 
-
-
-
-
 	getSessionDir(): string | undefined {
 		const sessionDir = this.settings.sessionDir;
 		return sessionDir ? normalizePath(sessionDir) : sessionDir;
@@ -790,9 +786,6 @@ export class SettingsManager {
 		this.save();
 	}
 
-
-
-
 	getDefaultThinkingLevel(): ThinkingLevel | undefined {
 		return this.settings.defaultThinkingLevel;
 	}
@@ -839,8 +832,6 @@ export class SettingsManager {
 		this.markModified("transport");
 		this.save();
 	}
-
-
 
 	getCompactionEnabled(): boolean {
 		return this.settings.compaction?.enabled ?? SETTINGS_DEFAULTS.compaction.enabled;
@@ -975,12 +966,9 @@ export class SettingsManager {
 		return parseTimeoutSetting(this.settings.websocketConnectTimeoutMs, "websocketConnectTimeoutMs");
 	}
 
-
 	getShowCacheMissNotices(): boolean {
 		return this.settings.showCacheMissNotices ?? SETTINGS_DEFAULTS.showCacheMissNotices;
 	}
-
-
 
 	setShowCacheMissNotices(show: boolean): void {
 		this.globalSettings.showCacheMissNotices = show;
@@ -998,8 +986,6 @@ export class SettingsManager {
 		this.markModified("shellPath");
 		this.save();
 	}
-
-
 
 	getDefaultProjectTrust(): DefaultProjectTrust {
 		const value = this.globalSettings.defaultProjectTrust;
@@ -1031,12 +1017,6 @@ export class SettingsManager {
 		this.markModified("npmCommand");
 		this.save();
 	}
-
-
-
-
-
-
 
 	/** Set the analytics opt-in preference; generates a tracking identifier on first opt-in */
 
@@ -1118,9 +1098,6 @@ export class SettingsManager {
 		});
 	}
 
-
-
-
 	getEnableSkillCommands(): boolean {
 		return this.settings.enableSkillCommands ?? SETTINGS_DEFAULTS.enableSkillCommands;
 	}
@@ -1143,25 +1120,6 @@ export class SettingsManager {
 	getThinkingBudgets(): ThinkingBudgetsSettings | undefined {
 		return this.settings.thinkingBudgets;
 	}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 	getImageAutoResize(): boolean {
 		return this.settings.images?.autoResize ?? SETTINGS_DEFAULTS.images.autoResize;
@@ -1205,21 +1163,6 @@ export class SettingsManager {
 		this.markModified("enabledModels");
 		this.save();
 	}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 	getWarnings(): WarningSettings {
 		return { ...(this.settings.warnings ?? {}) };

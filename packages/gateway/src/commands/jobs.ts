@@ -1,6 +1,6 @@
 import type { Lang } from "../channel/types.ts";
-import { t } from "../i18n/index.ts";
 import type { Job } from "../cron/store.ts";
+import { t } from "../i18n/index.ts";
 
 /** `/jobs` list lines: id, name, schedule, next run and last status. */
 export function formatJobs(jobs: Job[], lang: Lang): string {

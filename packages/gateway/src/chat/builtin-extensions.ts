@@ -1,5 +1,9 @@
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
-import { createCodemodeExtension, createMcpExtension, createToolSearchExtension } from "@earendil-works/pi-coding-agent";
+import {
+	createCodemodeExtension,
+	createMcpExtension,
+	createToolSearchExtension,
+} from "@earendil-works/pi-coding-agent";
 
 /**
  * Extensions every NekoPal session loads: codemode, tool search and MCP, the three the pi CLI

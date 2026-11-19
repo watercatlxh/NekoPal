@@ -120,7 +120,6 @@ describe("buildSystemPrompt", () => {
 
 			expect(prompt).toContain(expected);
 		});
-
 	});
 
 	describe("custom tool snippets", () => {

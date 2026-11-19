@@ -1,9 +1,9 @@
-import { Type } from "typebox";
 import type { AgentToolResult, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { defineTool } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import type { ChannelName } from "../channel/types.ts";
-import type { JobStore } from "../cron/store.ts";
 import { nextRun, parseSchedule } from "../cron/schedule.ts";
+import type { JobStore } from "../cron/store.ts";
 
 const parameters = Type.Object({
 	action: Type.Union([
@@ -38,7 +38,7 @@ export function cronTool(options: CronToolOptions): ToolDefinition<typeof parame
 		name: "cron",
 		label: "cron",
 		description:
-			"Schedule a prompt to run later and deliver its reply to this chat. Schedules: 30m, 2h, 1d (repeat), \"in 30m\", a 5-field cron expression, or an ISO timestamp.",
+			'Schedule a prompt to run later and deliver its reply to this chat. Schedules: 30m, 2h, 1d (repeat), "in 30m", a 5-field cron expression, or an ISO timestamp.',
 		promptSnippet: "cron: schedule recurring runs whose reply is delivered to this chat",
 		parameters,
 		async execute(_toolCallId, params): Promise<AgentToolResult<unknown>> {

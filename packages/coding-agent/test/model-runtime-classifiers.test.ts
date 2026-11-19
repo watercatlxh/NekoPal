@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { InMemoryModelsStore } from "@earendil-works/pi-ai";
+import { InMemoryModelsStore, isModelType } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { ModelRuntime } from "../src/core/model-runtime.ts";
@@ -69,7 +69,7 @@ describe("ModelRuntime classifiers", () => {
 		const runtime = await createRuntime();
 		const classifier = runtime.getModelOfType("classifier", "openai", "gpt-6-luna")!;
 		expect(classifier.type).toBe("classifier");
-		expect(runtime.getModels("openai").every((model) => model.type === "chat")).toBe(true);
+		expect(runtime.getModels("openai").every((model) => isModelType(model, "chat"))).toBe(true);
 
 		const unconfigured = await runtime.classify(classifier, context);
 		expect(unconfigured.stopReason).toBe("error");

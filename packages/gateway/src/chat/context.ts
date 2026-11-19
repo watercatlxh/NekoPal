@@ -1,33 +1,39 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
-import { createAgentSessionFromServices, createAgentSessionServices, createAgentSessionRuntime, noOpUIContext, SessionManager } from "@earendil-works/pi-coding-agent";
+import type { AssistantMessage, UserMessage } from "@earendil-works/pi-ai";
 import type {
 	AgentSession,
-	ToolDefinition,
 	AgentSessionEvent,
 	AgentSessionRuntime,
+	ExtensionUIContext,
+	ModelRuntime,
 	SessionInfo,
 	SettingsManager,
+	ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { builtInExtensions } from "./builtin-extensions.ts";
-import { logError } from "../log.ts";
-import { SESSIONS_DIR } from "../paths.ts";
-import type { ChatController } from "./reply.ts";
-import { ReplyController } from "./reply.ts";
+import {
+	createAgentSessionFromServices,
+	createAgentSessionRuntime,
+	createAgentSessionServices,
+	noOpUIContext,
+	SessionManager,
+} from "@earendil-works/pi-coding-agent";
 import type { Adapter, Lang, SentHandle } from "../channel/types.ts";
-import { t } from "../i18n/index.ts";
+import type { JobStore } from "../cron/store.ts";
 import type { NekoPalExtensionOptions } from "../extension/nekopal-extension.ts";
 import { nekopalExtension } from "../extension/nekopal-extension.ts";
-import type { MemoryStore, PendingStore } from "../memory/store.ts";
-import type { JobStore } from "../cron/store.ts";
-import { memoryTool } from "../tools/memory.ts";
-import { cronTool } from "../tools/cron.ts";
-import { sendTool } from "../tools/send.ts";
-import { configSetTool } from "../tools/config-set.ts";
+import { t } from "../i18n/index.ts";
+import { logError } from "../log.ts";
 import { formatTranscript, MemoryReview } from "../memory/review.ts";
-import type { AssistantMessage, UserMessage } from "@earendil-works/pi-ai";
+import type { MemoryStore, PendingStore } from "../memory/store.ts";
+import { SESSIONS_DIR } from "../paths.ts";
+import { configSetTool } from "../tools/config-set.ts";
+import { cronTool } from "../tools/cron.ts";
+import { memoryTool } from "../tools/memory.ts";
+import { sendTool } from "../tools/send.ts";
+import { builtInExtensions } from "./builtin-extensions.ts";
+import type { ChatController } from "./reply.ts";
+import { ReplyController } from "./reply.ts";
 
 /** The text blocks of a message, which is a string for user turns and blocks for assistant turns. */
 function textOf(content: UserMessage["content"] | AssistantMessage["content"]): string {
@@ -84,6 +90,8 @@ export class ChatContext implements ChatController {
 	private readonly redactor: NekoPalExtensionOptions["redactor"];
 	private readonly pendingStore: PendingStore;
 	private readonly jobs: JobStore;
+	/** Extension load failures, reported to the chat before its first reply. */
+	private extensionErrors = 0;
 	private readonly onPromptNotice: ((text: string) => void) | undefined;
 	private runtime!: AgentSessionRuntime;
 	private readonly reply: ReplyController;
@@ -163,6 +171,8 @@ export class ChatContext implements ChatController {
 					sessionStartEvent,
 					customTools: this.customTools(),
 				});
+				this.extensionErrors = services.resourceLoader.getExtensions().errors.length;
+				void this.reportExtensionErrors();
 				return { ...created, services, diagnostics: services.diagnostics };
 			},
 			{
@@ -173,6 +183,13 @@ export class ChatContext implements ChatController {
 		);
 		this.runtime.setRebindSession(async (session) => this.bind(session));
 		await this.bind(this.runtime.session);
+	}
+
+	/** Tell the chat about extensions that failed to load, once per session start. */
+	private async reportExtensionErrors(): Promise<void> {
+		const count = this.extensionErrors;
+		if (count === 0) return;
+		await this.say("ext.loadErrors", { n: count });
 	}
 
 	/** The NekoPal tools: memory, cron, send and config_set, all bound to this chat. */

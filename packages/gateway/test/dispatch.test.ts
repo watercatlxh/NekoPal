@@ -1,15 +1,15 @@
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
+import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Adapter, Caps, Inbound, SentHandle } from "../src/channel/types.ts";
-import { ChatRegistry } from "../src/chat/registry.ts";
 import { Dispatcher } from "../src/chat/dispatch.ts";
+import { ChatRegistry } from "../src/chat/registry.ts";
 import { JobStore } from "../src/cron/store.ts";
-import { MemoryStore, PendingStore } from "../src/memory/store.ts";
 import { SkillStore } from "../src/memory/skills.ts";
+import { MemoryStore, PendingStore } from "../src/memory/store.ts";
 import { StateStore } from "../src/state.ts";
 
 const caps: Caps = { edit: true, stream: false, maxChars: 4_000 };

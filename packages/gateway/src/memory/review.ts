@@ -1,12 +1,8 @@
 import type { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
-import {
-	createAgentSession,
-	DefaultResourceLoader,
-	SessionManager,
-} from "@earendil-works/pi-coding-agent";
+import { createAgentSession, DefaultResourceLoader, SessionManager } from "@earendil-works/pi-coding-agent";
 import { log, logError } from "../log.ts";
-import type { MemoryStore, PendingStore } from "./store.ts";
 import { memoryTool } from "../tools/memory.ts";
+import type { MemoryStore, PendingStore } from "./store.ts";
 
 /** Messages of the conversation a review reads. */
 const REVIEW_MESSAGES = 40;

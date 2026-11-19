@@ -2,11 +2,12 @@ import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
+import type { Adapter } from "./channel/types.ts";
+import { commandMenu } from "./commands/table.ts";
 import { Daemon } from "./daemon.ts";
+import { t } from "./i18n/index.ts";
 import { log, logError } from "./log.ts";
 import { HOME, SETTINGS_PATH } from "./paths.ts";
-import { t } from "./i18n/index.ts";
-import type { Adapter } from "./channel/types.ts";
 import { StateStore } from "./state.ts";
 
 const VERSION = "0.1.0";
@@ -21,7 +22,11 @@ function expandHome(path: string): string {
  *
  * Both adapters are loaded lazily so a deployment that only uses one never imports the other's code.
  */
-async function createAdapters(settingsManager: SettingsManager, state: StateStore): Promise<Adapter[]> {
+async function createAdapters(
+	settingsManager: SettingsManager,
+	state: StateStore,
+	menu: Array<{ command: string; description: string }>,
+): Promise<Adapter[]> {
 	const channels = settingsManager.getNekoPal().channels;
 	const adapters: Adapter[] = [];
 	if (channels?.telegram?.enabled) {
@@ -31,6 +36,7 @@ async function createAdapters(settingsManager: SettingsManager, state: StateStor
 				settingsManager,
 				log,
 				logError,
+				commands: menu,
 				offset: state.telegramOffset,
 				onOffset: (offset) => {
 					state.telegramOffset = offset;
@@ -56,7 +62,7 @@ async function main(): Promise<number> {
 	const settingsManager = SettingsManager.create(HOME, HOME);
 	const settings = settingsManager.getNekoPal();
 	const state = StateStore.load();
-	const adapters = await createAdapters(settingsManager, state);
+	const adapters = await createAdapters(settingsManager, state, commandMenu(settings.defaultLang ?? "en"));
 	if (adapters.length === 0) {
 		process.stderr.write(`${Daemon.noChannelMessage(settings.defaultLang ?? "en")}\n`);
 		return 1;

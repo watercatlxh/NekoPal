@@ -2,17 +2,16 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { ChannelName, Inbound, Lang } from "../channel/types.ts";
-import type { StateStore } from "../state.ts";
-import type { MemoryStore, PendingStore } from "../memory/store.ts";
-import type { JobStore } from "../cron/store.ts";
-import type { NekoPalExtensionOptions } from "../extension/nekopal-extension.ts";
-import type { ChatContext } from "./context.ts";
-import type { ChatRegistry } from "./registry.ts";
-import { t } from "../i18n/index.ts";
-import { log } from "../log.ts";
 import type { CommandContext, CommandTable } from "../commands/index.ts";
 import { parseCommand } from "../commands/index.ts";
 import { createCommands } from "../commands/table.ts";
+import type { JobStore } from "../cron/store.ts";
+import { t } from "../i18n/index.ts";
+import { log } from "../log.ts";
+import type { MemoryStore, PendingStore } from "../memory/store.ts";
+import type { StateStore } from "../state.ts";
+import type { ChatContext } from "./context.ts";
+import type { ChatRegistry } from "./registry.ts";
 
 /** A message whose sender is not on the channel allowlist. */
 const IGNORE_LOG_INTERVAL_MS = 60 * 60_000;
@@ -151,14 +150,6 @@ export class Dispatcher {
 			enabledChannels: this.options.enabledChannels,
 			qqQuota: this.options.qqQuota,
 		};
-	}
-
-	/** The command list for the platform's command menu. */
-	menu(lang: Lang): Array<{ command: string; description: string }> {
-		return [...this.commands.entries()].map(([name, command]) => ({
-			command: name,
-			description: command.description(lang),
-		}));
 	}
 }
 

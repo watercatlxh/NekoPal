@@ -31,7 +31,8 @@ export const messages = {
 	"login.choose": "Sign in to which provider?\n{{list}}",
 	"login.openUrl": "🔐 Open this link to sign in:\n{{url}}",
 	"login.deviceCode": "🔐 Open {{url}} and enter the code {{code}}",
-	"login.pasteWarning": "When done, paste the final redirect URL or the code shown here (10 minutes; /cancel to stop).\n⚠ This message stays in the chat history.",
+	"login.pasteWarning":
+		"When done, paste the final redirect URL or the code shown here (10 minutes; /cancel to stop).\n⚠ This message stays in the chat history.",
 	"login.done": "✅ Signed in to {{provider}}",
 	"login.cancelled": "Login cancelled",
 	"login.timeout": "Login timed out",
@@ -62,7 +63,8 @@ export const messages = {
 	"settings.header": "⚙ NekoPal settings",
 	"settings.model": "Model: {{model}} · thinking {{thinking}}",
 	"settings.lang": "Language: {{lang}}",
-	"settings.memory": "Memory: {{memory}}/{{memoryBudget}} chars ({{memoryPercent}}%) · profile {{user}}/{{userBudget}}",
+	"settings.memory":
+		"Memory: {{memory}}/{{memoryBudget}} chars ({{memoryPercent}}%) · profile {{user}}/{{userBudget}}",
 	"settings.pending": "  └ awaiting review: {{n}}",
 	"settings.jobs": "Scheduled jobs: {{n}} enabled",
 	"settings.channels": "Channels: {{channels}}",
@@ -73,7 +75,8 @@ export const messages = {
 	"help.header": "NekoPal commands",
 	"login.usage": "Usage: /login <{{providers}}>",
 	"login.unknown": "Unknown provider {{provider}}",
-	"daemon.noChannel": "No channel is enabled: set [nekopal.channels.telegram] enabled = true with a botToken, or [nekopal.channels.qq] with appId and appSecret.",
+	"daemon.noChannel":
+		"No channel is enabled: set [nekopal.channels.telegram] enabled = true with a botToken, or [nekopal.channels.qq] with appId and appSecret.",
 	"daemon.args": "nekopal takes no arguments; edit {{settings}} instead.",
 } as const;
 

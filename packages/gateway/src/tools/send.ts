@@ -1,15 +1,13 @@
 import { existsSync, statSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
-import { Type } from "typebox";
 import type { AgentToolResult, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { defineTool } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import type { Adapter } from "../channel/types.ts";
 
 const parameters = Type.Object({
 	text: Type.Optional(Type.String({ description: "Message text, in Markdown" })),
-	files: Type.Optional(
-		Type.Array(Type.String(), { description: "File paths, relative to the working directory" }),
-	),
+	files: Type.Optional(Type.Array(Type.String(), { description: "File paths, relative to the working directory" })),
 });
 
 export interface SendToolOptions {

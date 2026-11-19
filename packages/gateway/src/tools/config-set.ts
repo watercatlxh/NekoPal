@@ -1,14 +1,14 @@
 import { copyFileSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { Type } from "typebox";
-import { Compile } from "typebox/compile";
-import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 import type { AgentToolResult, SettingsManager, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { defineTool, SettingsSchema } from "@earendil-works/pi-coding-agent";
+import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
+import { Type } from "typebox";
+import { Compile } from "typebox/compile";
 import { SETTINGS_BACKUP_PATH, SETTINGS_PATH } from "../paths.ts";
 
 const parameters = Type.Object({
 	key: Type.String({ description: 'Dot path such as "nekopal.memory.reviewEveryTurns" or "defaultModel"' }),
-	value: Type.String({ description: "TOML value literal, such as 5, \"text\", or [1, 2]" }),
+	value: Type.String({ description: 'TOML value literal, such as 5, "text", or [1, 2]' }),
 });
 
 const validateSettings = Compile(SettingsSchema);
@@ -75,9 +75,7 @@ export function configSetTool(options: ConfigSetToolOptions): ToolDefinition<typ
 			renameSync(temp, settingsPath);
 			await options.settingsManager.reload();
 
-			const note = params.key.startsWith("nekopal.channels.")
-				? " Takes effect after the daemon restarts."
-				: "";
+			const note = params.key.startsWith("nekopal.channels.") ? " Takes effect after the daemon restarts." : "";
 			return {
 				content: [{ type: "text", text: `Set ${params.key} = ${params.value}.${note}` }],
 				details: undefined,

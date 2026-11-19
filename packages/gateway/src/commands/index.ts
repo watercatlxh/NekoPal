@@ -1,13 +1,13 @@
 import type { AgentSession, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { findExactModelReferenceMatch, resolveModelReference } from "@earendil-works/pi-coding-agent";
+import type { Inbound, Lang } from "../channel/types.ts";
 import type { ChatContext } from "../chat/context.ts";
 import type { ChatRegistry } from "../chat/registry.ts";
-import type { Inbound, Lang } from "../channel/types.ts";
-import { t } from "../i18n/index.ts";
-import type { MemoryOperation, MemoryStore, PendingStore } from "../memory/store.ts";
-import type { JobStore } from "../cron/store.ts";
 import { parseSchedule } from "../cron/schedule.ts";
+import type { JobStore } from "../cron/store.ts";
+import { t } from "../i18n/index.ts";
 import { logError } from "../log.ts";
+import type { MemoryOperation, MemoryStore, PendingStore } from "../memory/store.ts";
 
 export interface CommandContext {
 	chat: ChatContext;
@@ -57,9 +57,16 @@ const DESCRIPTIONS: Record<string, (lang: Lang) => string> = {
 	cancel: (lang) => t(lang, "cmd.cancel.desc"),
 };
 
+/** `/name — description`, the line `/help` prints for a command. */
 export function describe(name: string, lang: Lang): string {
 	const description = DESCRIPTIONS[name];
 	return `/${name} — ${description ? description(lang) : ""}`;
+}
+
+/** A command's one-line description, without the name. */
+export function descriptionOf(name: string, lang: Lang): string {
+	const description = DESCRIPTIONS[name];
+	return description ? description(lang) : "";
 }
 
 export function parseCommand(text: string): { name: string; args: string } | undefined {

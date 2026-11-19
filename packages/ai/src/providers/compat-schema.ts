@@ -626,11 +626,7 @@ export const CompatSchemasByApi = {
 } as const;
 
 const ProviderCompatProperties = mergeCompatProperties(
-	[
-		OpenAICompletionsCompatProperties,
-		OpenAIResponsesCompatProperties,
-		AnthropicMessagesCompatProperties,
-	],
+	[OpenAICompletionsCompatProperties, OpenAIResponsesCompatProperties, AnthropicMessagesCompatProperties],
 	ProviderCompatPropertyOverrides,
 );
 

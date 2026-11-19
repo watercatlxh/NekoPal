@@ -23,9 +23,7 @@ export function formatStored(store: MemoryStore): string {
 /** Numbered suggestions waiting for approval. */
 export function formatPending(entries: PendingMemory[]): string {
 	if (entries.length === 0) return "";
-	return entries
-		.map((entry, index) => `${index + 1}. [${entry.target}] ${entry.summary} (${entry.id})`)
-		.join("\n");
+	return entries.map((entry, index) => `${index + 1}. [${entry.target}] ${entry.summary} (${entry.id})`).join("\n");
 }
 
 /** The `/memory list` body: stored entries first, then pending suggestions. */

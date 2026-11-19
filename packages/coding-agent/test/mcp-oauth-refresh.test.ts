@@ -259,5 +259,4 @@ describe("MCP OAuth client registration", () => {
 		expect(server.tokenRequests[1].get("client_id")).toBe("client-1");
 		expect((await store.load())?.clientInformation?.client_id).toBe("client-1");
 	});
-
 });

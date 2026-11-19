@@ -113,7 +113,7 @@ interface McpServer {
 	closing?: Promise<void>;
 }
 
-const EXPOSURE_DESCRIPTIONS: Record<Exclude<McpExposure, "hidden">, string> = {
+const _EXPOSURE_DESCRIPTIONS: Record<Exclude<McpExposure, "hidden">, string> = {
 	codemode: "called from codemode scripts, which find them with searchTools()",
 	deferred: "not declared until tool_search loads them, then called directly; no codemode needed",
 	direct: "declared to the model like built-in tools",
@@ -248,7 +248,7 @@ function describeState(server: McpServer, withError = true): string {
 }
 
 /** Servers that need the user first. */
-function attentionRank(server: McpServer): number {
+function _attentionRank(server: McpServer): number {
 	if (!isEnabled(server)) return 5;
 	switch (server.connection?.state) {
 		case "needs-auth":
@@ -264,7 +264,7 @@ function attentionRank(server: McpServer): number {
 	}
 }
 
-function describeTransport(entry: McpServerEntry): string {
+function _describeTransport(entry: McpServerEntry): string {
 	const { config } = entry;
 	if ("url" in config) return config.url;
 	return [config.command, ...(config.args ?? [])].join(" ");
@@ -712,7 +712,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
 		};
 
 		/** Returns an error message when the config could not be saved; connection errors show in the state. */
-		const setEnabled = async (
+		const _setEnabled = async (
 			server: McpServer,
 			enabled: boolean,
 			inProject = false,
@@ -730,7 +730,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
 				}
 				const closing = server.closing;
 				hideTools(server.entry.name);
-					try {
+				try {
 					await closing;
 				} finally {
 					if (server.closing === closing) server.closing = undefined;
@@ -741,7 +741,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
 			return undefined;
 		};
 
-		const setExposure = (server: McpServer, exposure: McpExposure): string | undefined => {
+		const _setExposure = (server: McpServer, exposure: McpExposure): string | undefined => {
 			const failed = saveConfig(server, { exposure });
 			if (failed) return failed;
 			if (server.connection?.state === "connected") registerTools(server.connection);

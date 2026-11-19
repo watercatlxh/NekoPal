@@ -2,26 +2,26 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import type { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { setProtectedPaths } from "@earendil-works/pi-coding-agent";
 import type { Adapter, ChannelName, Lang } from "./channel/types.ts";
-import { ChatRegistry } from "./chat/registry.ts";
 import { Dispatcher } from "./chat/dispatch.ts";
+import { ChatRegistry } from "./chat/registry.ts";
 import { Scheduler } from "./cron/scheduler.ts";
 import { JobStore } from "./cron/store.ts";
-import { MemoryStore, PendingStore } from "./memory/store.ts";
-import { SkillStore } from "./memory/skills.ts";
-import { StateStore } from "./state.ts";
-import { log, logError } from "./log.ts";
 import { t } from "./i18n/index.ts";
+import { log, logError } from "./log.ts";
+import { SkillStore } from "./memory/skills.ts";
+import { MemoryStore, PendingStore } from "./memory/store.ts";
 import {
+	AUTH_PATH,
 	CRON_DIR,
 	MEMORY_DIR,
 	PENDING_DIR,
+	SESSIONS_DIR,
 	SETTINGS_BACKUP_PATH,
 	SETTINGS_PATH,
-	AUTH_PATH,
 	SKILLS_DIR,
-	SESSIONS_DIR,
 	STATE_PATH,
 } from "./paths.ts";
+import type { StateStore } from "./state.ts";
 
 export interface DaemonOptions {
 	settingsManager: SettingsManager;

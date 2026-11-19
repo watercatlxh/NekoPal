@@ -20,7 +20,6 @@ import { readPiManifest } from "../pi-manifest.ts";
 import { createSyntheticSourceInfo, getSyntheticPathSource, isSyntheticPath } from "../source-info.ts";
 import { time } from "../timings.ts";
 import type { ModelRouteRequest, VirtualModelDefinition } from "../virtual-models.ts";
-import type { KeyId } from "./ui-types.ts";
 import type {
 	EntryRenderer,
 	Extension,
@@ -38,6 +37,7 @@ import type {
 	ToolDefinition,
 	ToolRendererResolver,
 } from "./types.ts";
+import type { KeyId } from "./ui-types.ts";
 
 const require = createRequire(import.meta.url);
 

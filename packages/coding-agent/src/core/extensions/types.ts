@@ -44,21 +44,6 @@ import type {
 	Usage,
 } from "@earendil-works/pi-ai";
 import type { Static, TSchema } from "typebox";
-import type {
-	AutocompleteItem,
-	AutocompleteProvider,
-	Component,
-	EditorComponent,
-	EditorTheme,
-	Keybinding,
-	KeyId,
-	KeybindingsManager,
-	OverlayHandle,
-	OverlayOptions,
-	ProgramStatus,
-	Theme,
-	TUI,
-} from "./ui-types.ts";
 import type { BashResult } from "../bash-executor.ts";
 import type { CacheWarmingDecisionEvent, CacheWarmingDecisionEventResult } from "../cache-warmer.ts";
 import type { CompactionPreparation, CompactionResult } from "../compaction/index.ts";
@@ -102,11 +87,25 @@ import type {
 	WriteToolInput,
 } from "../tools/index.ts";
 import type { ModelRoute, ModelRouteRequest, VirtualModelDefinition } from "../virtual-models.ts";
+import type {
+	AutocompleteItem,
+	AutocompleteProvider,
+	Component,
+	EditorComponent,
+	EditorTheme,
+	Keybinding,
+	KeybindingsManager,
+	KeyId,
+	OverlayHandle,
+	OverlayOptions,
+	ProgramStatus,
+	Theme,
+	TUI,
+} from "./ui-types.ts";
 
-export type { AppKeybinding } from "./ui-types.ts";
-export type { KeybindingsManager } from "./ui-types.ts";
 export type { ExecOptions, ExecResult } from "../exec.ts";
 export type { BuildSystemPromptOptions, NormalizedBuildSystemPromptOptions } from "../system-prompt.ts";
+export type { AppKeybinding, KeybindingsManager } from "./ui-types.ts";
 export type { AgentToolResult, AgentToolUpdateCallback, ToolExecutionMode };
 
 // ============================================================================

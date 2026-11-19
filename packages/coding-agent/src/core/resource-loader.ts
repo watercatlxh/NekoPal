@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import chalk from "chalk";
 import { APP_NAME, CONFIG_DIR_NAME } from "../config.ts";
@@ -490,7 +490,6 @@ export class DefaultResourceLoader implements ResourceLoader {
 			);
 			this.updatePromptsFromPaths(this.lastPromptPaths, this.resourceMetadataByPath);
 		}
-
 	}
 
 	async loadProjectTrustExtensions(): Promise<LoadExtensionsResult> {

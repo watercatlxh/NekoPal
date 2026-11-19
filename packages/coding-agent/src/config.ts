@@ -1,7 +1,7 @@
-import { accessSync, constants, existsSync, readFileSync, realpathSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { createRequire } from "module";
 import { homedir } from "os";
-import { basename, dirname, join, resolve, sep, win32 } from "path";
+import { basename, dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { normalizePath } from "./utils/paths.ts";
 import { stripBom } from "./utils/text.ts";

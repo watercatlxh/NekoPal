@@ -4,7 +4,7 @@ import { join } from "path";
 import { parse as parseToml } from "smol-toml";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS } from "../src/core/http-dispatcher.ts";
-import { type Settings, SettingsManager } from "../src/core/settings-manager.ts";
+import { SettingsManager } from "../src/core/settings-manager.ts";
 
 function readToml(path: string): Record<string, unknown> {
 	return parseToml(readFileSync(path, "utf-8")) as Record<string, unknown>;
@@ -445,14 +445,8 @@ describe("SettingsManager", () => {
 		});
 
 		it("layers project modifiers on top of the global selection", () => {
-			writeFileSync(
-				join(agentDir, "settings.toml"),
-				'defaultTools = ["read", "bash", "+codemode"]\n',
-			);
-			writeFileSync(
-				join(projectDir, ".nekopal", "settings.toml"),
-				'defaultTools = ["-codemode", "+tool_search"]\n',
-			);
+			writeFileSync(join(agentDir, "settings.toml"), 'defaultTools = ["read", "bash", "+codemode"]\n');
+			writeFileSync(join(projectDir, ".nekopal", "settings.toml"), 'defaultTools = ["-codemode", "+tool_search"]\n');
 
 			const manager = SettingsManager.create(projectDir, agentDir);
 			expect(manager.getDefaultTools()).toEqual(["read", "bash", "tool_search"]);

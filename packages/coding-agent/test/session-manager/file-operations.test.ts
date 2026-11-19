@@ -1,14 +1,13 @@
 import { constants as bufferConstants } from "buffer";
 import {
 	appendFileSync,
-	chmodSync,
-	renameSync,
 	closeSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	openSync,
 	readFileSync,
+	renameSync,
 	rmSync,
 	writeFileSync,
 	writeSync,

@@ -21,7 +21,7 @@ describe("createAgentSession client identity", () => {
 	let tempDir: string;
 	let cwd: string;
 	let agentDir: string;
-	let originalTelemetryEnv: string | undefined;
+	let _originalTelemetryEnv: string | undefined;
 
 	beforeEach(() => {
 		tempDir = join(tmpdir(), `pi-sdk-identity-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);

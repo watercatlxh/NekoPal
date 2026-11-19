@@ -11,9 +11,7 @@ const tables: Record<Lang, Record<MessageKey, string>> = { en, zh };
 export function t(lang: Lang, key: MessageKey, vars?: Record<string, string | number>): string {
 	const template = tables[lang][key];
 	if (!vars) return template;
-	return template.replace(/\{\{(\w+)\}\}/g, (match, name: string) =>
-		name in vars ? String(vars[name]) : match,
-	);
+	return template.replace(/\{\{(\w+)\}\}/g, (match, name: string) => (name in vars ? String(vars[name]) : match));
 }
 
 /** Pick a language from a platform language code, such as Telegram's `zh-hans`. */

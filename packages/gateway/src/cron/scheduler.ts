@@ -5,16 +5,17 @@ import {
 	findExactModelReferenceMatch,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import type { Adapter } from "../channel/types.ts";
-import { log, logError } from "../log.ts";
-import { t } from "../i18n/index.ts";
-import type { Lang } from "../channel/types.ts";
-import type { MemoryStore } from "../memory/store.ts";
+import type { Adapter, Lang } from "../channel/types.ts";
+import { builtInExtensions } from "../chat/builtin-extensions.ts";
 import type { NekoPalExtensionOptions } from "../extension/nekopal-extension.ts";
 import { nekopalExtension } from "../extension/nekopal-extension.ts";
-import { builtInExtensions } from "../chat/builtin-extensions.ts";
-import type { Job, JobStore } from "./store.ts";
+import { t } from "../i18n/index.ts";
+import { log, logError } from "../log.ts";
+import type { MemoryStore } from "../memory/store.ts";
+import { cronTool } from "../tools/cron.ts";
+import { sendTool } from "../tools/send.ts";
 import { graceMs, nextRun, parseSchedule } from "./schedule.ts";
+import type { Job, JobStore } from "./store.ts";
 
 const TICK_MS = 60_000;
 
@@ -114,6 +115,8 @@ export class Scheduler {
 				],
 			});
 			await loader.reload();
+			const adapter = this.options.adapterFor(job.deliver.channel);
+			if (!adapter) throw new Error(`no ${job.deliver.channel} adapter`);
 			const { session } = await createAgentSession({
 				cwd: this.options.workspace,
 				agentDir: this.options.agentDir,
@@ -122,7 +125,13 @@ export class Scheduler {
 				model,
 				resourceLoader: loader,
 				sessionManager: SessionManager.inMemory(this.options.workspace),
-				tools: ["+memory", "-memory"],
+				// The default tool set without `memory`: a scheduled run reads context, it does not
+				// rewrite the memory stores. `send` lets it deliver files, not just its final text.
+				tools: ["-memory"],
+				customTools: [
+					sendTool({ adapter, chatId: job.deliver.chatId, cwd: this.options.workspace }),
+					cronTool({ store: this.options.store, deliver: job.deliver }),
+				],
 			});
 			try {
 				await session.prompt(job.prompt);

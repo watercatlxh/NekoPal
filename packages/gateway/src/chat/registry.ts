@@ -1,11 +1,11 @@
 import type { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { log, logError } from "../log.ts";
 import type { Adapter, ChannelName, Inbound, Lang } from "../channel/types.ts";
-import { languageFromCode } from "../i18n/index.ts";
-import type { StateStore } from "../state.ts";
-import type { MemoryStore, PendingStore } from "../memory/store.ts";
 import type { JobStore } from "../cron/store.ts";
 import type { NekoPalExtensionOptions } from "../extension/nekopal-extension.ts";
+import { languageFromCode } from "../i18n/index.ts";
+import { log, logError } from "../log.ts";
+import type { MemoryStore, PendingStore } from "../memory/store.ts";
+import type { StateStore } from "../state.ts";
 import { ChatContext } from "./context.ts";
 
 export interface ChatRegistryOptions {

@@ -1,11 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { Type } from "typebox";
 import type { AgentToolResult, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { defineTool } from "@earendil-works/pi-coding-agent";
-import { SKILLS_DIR } from "../paths.ts";
+import { Type } from "typebox";
 import type { MemoryOperation, MemoryStore, PendingStore } from "../memory/store.ts";
 import { firstThreat } from "../memory/threats.ts";
+import { SKILLS_DIR } from "../paths.ts";
 
 const SKILL_NAME = /^[a-z0-9-]{1,64}$/;
 
@@ -80,7 +80,8 @@ export function memoryTool(options: MemoryToolOptions): ToolDefinition<typeof pa
 			const operations = params.operations as MemoryOperation[];
 			for (const operation of operations) {
 				const text = operation.content ?? "";
-				if (text && firstThreat(text)) throw new Error("content looks like a prompt injection; refusing to store it");
+				if (text && firstThreat(text))
+					throw new Error("content looks like a prompt injection; refusing to store it");
 			}
 
 			if (options.origin === "review") {

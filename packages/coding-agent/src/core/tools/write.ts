@@ -3,8 +3,8 @@ import { dirname } from "path";
 import { type Static, Type } from "typebox";
 import type { ExtensionContext, ToolDefinition } from "../extensions/types.ts";
 import { withFileMutationQueue } from "./file-mutation-queue.ts";
-import { checkProtectedPath } from "./protected-paths.ts";
 import { resolveToCwd } from "./path-utils.ts";
+import { checkProtectedPath } from "./protected-paths.ts";
 import { type TypeBoxAgentTool, wrapToolDefinition } from "./tool-definition-wrapper.ts";
 
 const writeSchema = Type.Object({

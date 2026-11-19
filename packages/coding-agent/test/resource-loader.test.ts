@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -102,7 +102,9 @@ describe("DefaultResourceLoader", () => {
 			expect(warnings).toHaveLength(1);
 			expect(warnings[0].path).toBe("npm:broken-package");
 			expect(warnings[0].warning).toMatch(/^failed to install \(.*failed with code 1\)\./);
-			expect(warnings[0].warning).toContain('Run "nekopal remove npm:broken-package" to remove it from settings.toml.');
+			expect(warnings[0].warning).toContain(
+				'Run "nekopal remove npm:broken-package" to remove it from settings.toml.',
+			);
 		});
 
 		// #11088

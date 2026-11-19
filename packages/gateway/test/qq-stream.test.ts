@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import { QqError, type QqApi } from "../src/channel/qq/api.ts";
+import { type QqApi, QqError } from "../src/channel/qq/api.ts";
 import { QqStream } from "../src/channel/qq/stream.ts";
 
 interface Call {

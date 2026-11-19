@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import type { ExtensionAPI, InlineExtension } from "@earendil-works/pi-coding-agent";
-import { SOUL_PATH } from "../paths.ts";
-import type { MemoryStore } from "../memory/store.ts";
 import type { ChannelName } from "../channel/types.ts";
+import type { MemoryStore } from "../memory/store.ts";
+import { SOUL_PATH } from "../paths.ts";
 
 const CHANNEL_PROMPTS: Record<ChannelName, string> = {
 	telegram: "Telegram",

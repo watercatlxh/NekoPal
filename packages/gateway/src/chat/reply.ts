@@ -1,9 +1,9 @@
-import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import { logError } from "../log.ts";
+import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { Adapter, ChannelStream, SentHandle } from "../channel/types.ts";
-import type { MessageKey, Lang } from "../i18n/index.ts";
+import type { Lang, MessageKey } from "../i18n/index.ts";
 import { t } from "../i18n/index.ts";
+import { logError } from "../log.ts";
 
 /** Minimum time between two edits of the placeholder, so a fast stream stays inside rate limits. */
 const EDIT_INTERVAL_MS = 1_500;
@@ -40,7 +40,6 @@ export class ReplyController {
 	private timer: NodeJS.Timeout | undefined;
 	private stopped = false;
 	private stream: ChannelStream | undefined;
-	private streamText = "";
 	private streamed = false;
 
 	constructor(chat: ChatController) {
@@ -80,13 +79,14 @@ export class ReplyController {
 	private async begin(): Promise<void> {
 		this.stopped = false;
 		this.text = "";
-		this.streamText = "";
 		this.streamed = false;
 		this.toolCount = 0;
 		this.lastTool = undefined;
 		this.startedAt = Date.now();
 		this.lastEditAt = 0;
-		this.stream = this.chat.adapter.caps.stream ? this.chat.adapter.openStream(this.chat.chatId, this.chat.replyTo) : undefined;
+		this.stream = this.chat.adapter.caps.stream
+			? this.chat.adapter.openStream(this.chat.chatId, this.chat.replyTo)
+			: undefined;
 		if (this.stream || !this.chat.adapter.caps.edit) return;
 		this.placeholder = (await this.chat.send(PLACEHOLDER))[0];
 	}

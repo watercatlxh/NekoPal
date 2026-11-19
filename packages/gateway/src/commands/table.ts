@@ -1,13 +1,13 @@
 import { DefaultPackageManager } from "@earendil-works/pi-coding-agent";
-import type { ChatContext } from "../chat/context.ts";
 import type { Lang } from "../channel/types.ts";
+import type { ChatContext } from "../chat/context.ts";
+import { nextRun } from "../cron/schedule.ts";
 import { t } from "../i18n/index.ts";
 import type { CommandContext, CommandTable } from "./index.ts";
-import { nextRun } from "../cron/schedule.ts";
-import { describe, formatUptime, modelLabel, parseSchedule, resolveModel } from "./index.ts";
-import { formatPending, formatStored, formatUsage } from "./memory.ts";
+import { describe, descriptionOf, formatUptime, modelLabel, parseSchedule, resolveModel } from "./index.ts";
 import { formatJobs } from "./jobs.ts";
 import { loginCommand, logoutCommand } from "./login.ts";
+import { formatPending, formatStored, formatUsage } from "./memory.ts";
 
 const HELP_ORDER = [
 	"help",
@@ -34,6 +34,14 @@ function chatOf(context: CommandContext): ChatContext {
 }
 
 /** The chat command table. */
+/** The command list for a platform menu: name without the slash, and its description. */
+export function commandMenu(lang: Lang): Array<{ command: string; description: string }> {
+	return HELP_ORDER.filter((name) => name !== "cancel").map((name) => ({
+		command: name,
+		description: descriptionOf(name, lang),
+	}));
+}
+
 export function createCommands(): CommandTable {
 	const commands: CommandTable = new Map();
 
@@ -167,7 +175,9 @@ export function createCommands(): CommandTable {
 					if (list.length < 10) list.push(model.id);
 					groups.set(model.provider, list);
 				}
-				const lines = [t(lang, "model.current", { model: modelLabel(chat.session), thinking: chat.session.thinkingLevel })];
+				const lines = [
+					t(lang, "model.current", { model: modelLabel(chat.session), thinking: chat.session.thinkingLevel }),
+				];
 				for (const [provider, ids] of groups) lines.push(`${provider}: ${ids.join(", ")}`);
 				await chat.sendPlain(lines.join("\n"));
 				return;
@@ -204,9 +214,7 @@ export function createCommands(): CommandTable {
 					return;
 				}
 				const chosen =
-					ref === "all"
-						? entries
-						: entries.filter((entry) => entry.id.startsWith(ref) || entry.id === ref);
+					ref === "all" ? entries : entries.filter((entry) => entry.id.startsWith(ref) || entry.id === ref);
 				if (chosen.length === 0) {
 					await chat.say("memory.nonePending");
 					return;

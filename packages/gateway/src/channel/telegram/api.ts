@@ -103,11 +103,11 @@ export class TelegramApi {
 		return this.call<TelegramMessage>("sendMessage", body, 60_000);
 	}
 
-	async sendPhoto(body: Record<string, unknown>, form: FormData): Promise<TelegramMessage> {
+	async sendPhoto(_body: Record<string, unknown>, form: FormData): Promise<TelegramMessage> {
 		return this.upload<TelegramMessage>("sendPhoto", form, 120_000);
 	}
 
-	async sendDocument(body: Record<string, unknown>, form: FormData): Promise<TelegramMessage> {
+	async sendDocument(_body: Record<string, unknown>, form: FormData): Promise<TelegramMessage> {
 		return this.upload<TelegramMessage>("sendDocument", form, 120_000);
 	}
 

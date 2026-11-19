@@ -52,10 +52,7 @@ function sendsNativeEffort(model: ChatModel): boolean {
 	if (model.api === "anthropic-messages") {
 		return (model as Model<"anthropic-messages">).compat?.forceAdaptiveThinking === true;
 	}
-	if (
-		model.api === "openai-responses" ||
-		model.api === "openai-codex-responses"
-	) {
+	if (model.api === "openai-responses" || model.api === "openai-codex-responses") {
 		return true;
 	}
 	if (model.api !== "openai-completions") return false;

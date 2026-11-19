@@ -15,7 +15,8 @@ export const NekoPalSettingsSchema = Type.Object({
 	),
 	workspace: Type.Optional(
 		Type.String({
-			description: 'Working directory of the agent, such as "~/.nekopal/workspace". "~" expands to the home directory.',
+			description:
+				'Working directory of the agent, such as "~/.nekopal/workspace". "~" expands to the home directory.',
 			default: "~/.nekopal/workspace",
 		}),
 	),

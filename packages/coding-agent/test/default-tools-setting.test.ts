@@ -225,7 +225,9 @@ describe("defaultTools setting", () => {
 		const writeSettings = (settings: { defaultTools?: string[] }) =>
 			writeFileSync(
 				join(agentDir, "settings.toml"),
-				settings.defaultTools ? `defaultTools = [${settings.defaultTools.map((t) => JSON.stringify(t)).join(", ")}]\n` : "",
+				settings.defaultTools
+					? `defaultTools = [${settings.defaultTools.map((t) => JSON.stringify(t)).join(", ")}]\n`
+					: "",
 			);
 
 		async function createFileSession(options: ToolOptions = {}) {

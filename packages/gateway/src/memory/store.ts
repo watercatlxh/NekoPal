@@ -1,5 +1,14 @@
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
+import {
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { dirname } from "node:path";
 import { MEMORY_FILE, PENDING_DIR, USER_FILE } from "../paths.ts";
 import { firstThreat } from "./threats.ts";

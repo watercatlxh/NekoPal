@@ -10,7 +10,6 @@ import {
 	type ImageModel,
 	type ImagesOptions,
 	InMemoryModelsStore,
-	isModelType,
 	type Model,
 } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";

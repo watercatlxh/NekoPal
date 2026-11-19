@@ -114,23 +114,20 @@ describe("compaction model overrides", () => {
 	});
 
 	describe.each(["reserveTokens", "keepRecentTokens"] as const)("model override %s", (field) => {
-		it.each([-1, 1.5, "400000", true, {}, []])(
-			"reports invalid token values: %j",
-			(value) => {
-				const storage = new InMemorySettingsStorage();
-				storage.withLock("global", () =>
-					stringifyToml({
-						compaction: { modelOverrides: { [modelKey]: { [field]: value } } },
-					}),
-				);
-				const manager = SettingsManager.fromStorage(storage);
-				expect(() => manager.getCompactionSettings(model)).toThrow(
-					`Invalid compaction.modelOverrides["${modelKey}"].${field} setting: ${String(value)}. Expected a non-negative safe integer.`,
-				);
-				expect(manager.getCompactionSettings()).toEqual(defaults);
-				expect(manager.getCompactionSettings({ provider: "other", id: model.id })).toEqual(defaults);
-			},
-		);
+		it.each([-1, 1.5, "400000", true, {}, []])("reports invalid token values: %j", (value) => {
+			const storage = new InMemorySettingsStorage();
+			storage.withLock("global", () =>
+				stringifyToml({
+					compaction: { modelOverrides: { [modelKey]: { [field]: value } } },
+				}),
+			);
+			const manager = SettingsManager.fromStorage(storage);
+			expect(() => manager.getCompactionSettings(model)).toThrow(
+				`Invalid compaction.modelOverrides["${modelKey}"].${field} setting: ${String(value)}. Expected a non-negative safe integer.`,
+			);
+			expect(manager.getCompactionSettings()).toEqual(defaults);
+			expect(manager.getCompactionSettings({ provider: "other", id: model.id })).toEqual(defaults);
+		});
 
 		it.each([null, Number.MAX_SAFE_INTEGER + 1])(
 			"reports invalid in-memory token values TOML cannot store: %j",

@@ -1,19 +1,13 @@
 import { readFileSync, statSync } from "node:fs";
 import { basename, extname } from "node:path";
-import { resolveConfigValue } from "@earendil-works/pi-coding-agent";
 import type { SettingsManager } from "@earendil-works/pi-coding-agent";
-import type { Adapter, Attachment, Caps, Inbound, Lang, SentHandle } from "../types.ts";
-import { splitMarkdown } from "../split.ts";
+import { resolveConfigValue } from "@earendil-works/pi-coding-agent";
 import { t } from "../../i18n/index.ts";
+import { splitMarkdown } from "../split.ts";
+import type { Adapter, Attachment, Caps, ChannelStream, Inbound, Lang, SentHandle } from "../types.ts";
 import { QqApi, QqError } from "./api.ts";
-import {
-	PassiveBudget,
-	ProactiveBudget,
-	type ProactiveCounts,
-	type ProactiveStorage,
-} from "./budget.ts";
+import { PassiveBudget, ProactiveBudget, type ProactiveCounts, type ProactiveStorage } from "./budget.ts";
 import { QqGateway, type QqLog, type QqLogError, type QqMessageEvent } from "./gateway.ts";
-import type { ChannelStream } from "../types.ts";
 import { QqStream, type StreamBudget } from "./stream.ts";
 import { stripMarkdown } from "./strip.ts";
 import { TokenProvider } from "./token.ts";
@@ -159,6 +153,7 @@ export class QqAdapter implements Adapter {
 			api,
 			chatId,
 			budget,
+			sendRest: (markdown) => this.sendMarkdown(chatId, markdown, sourceId).then(() => undefined),
 			logError: (message, error) => this.options.logError(message, error),
 		});
 	}
@@ -310,7 +305,9 @@ export class QqAdapter implements Adapter {
 	 */
 	private takeSlot(chatId: string, replyTo?: string): Record<string, unknown> | undefined {
 		const now = Date.now();
-		if (replyTo !== undefined) {
+		// Only a message this adapter received has a passive window; an unknown id would be a
+		// `msg_id` QQ rejects.
+		if (replyTo !== undefined && this.passive.remaining(replyTo, now) > 0) {
 			const msgSeq = this.passive.takePassive(replyTo, now);
 			if (msgSeq !== undefined) return { msg_id: replyTo, msg_seq: msgSeq };
 		}
@@ -374,9 +371,10 @@ export class QqAdapter implements Adapter {
 function storeAdapter(state: QqQuotaStore): ProactiveStorage {
 	return {
 		load: () => state.qq,
-		save: (counts) => state.mutate((target) => {
-			target.qq = counts;
-		}),
+		save: (counts) =>
+			state.mutate((target) => {
+				target.qq = counts;
+			}),
 	};
 }
 
