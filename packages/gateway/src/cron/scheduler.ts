@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import type { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import {
 	createAgentSession,
@@ -108,6 +109,7 @@ export class Scheduler {
 					...builtInExtensions,
 					nekopalExtension({
 						channel: job.deliver.channel,
+						soulPath: join(this.options.agentDir, "SOUL.md"),
 						memory: this.options.memory,
 						redactor: this.options.redactor,
 						cron: { name: job.name },

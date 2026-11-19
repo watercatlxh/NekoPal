@@ -26,7 +26,6 @@ import { t } from "../i18n/index.ts";
 import { logError } from "../log.ts";
 import { formatTranscript, MemoryReview } from "../memory/review.ts";
 import type { MemoryStore, PendingStore } from "../memory/store.ts";
-import { SESSIONS_DIR } from "../paths.ts";
 import { configSetTool } from "../tools/config-set.ts";
 import { cronTool } from "../tools/cron.ts";
 import { memoryTool } from "../tools/memory.ts";
@@ -129,6 +128,11 @@ export class ChatContext implements ChatController {
 		});
 	}
 
+	/** This chat's session directory, under the daemon's data directory. */
+	private sessionDir(): string {
+		return join(this.agentDir, "sessions", `${this.adapter.name}-${this.chatId}`);
+	}
+
 	get session(): AgentSession {
 		return this.runtime.session;
 	}
@@ -143,7 +147,7 @@ export class ChatContext implements ChatController {
 
 	/** Create the session and bind extensions; call once at startup. */
 	async start(): Promise<void> {
-		const sessionDir = join(SESSIONS_DIR, `${this.adapter.name}-${this.chatId}`);
+		const sessionDir = this.sessionDir();
 		mkdirSync(sessionDir, { recursive: true });
 		mkdirSync(this.workspace, { recursive: true });
 
@@ -159,6 +163,7 @@ export class ChatContext implements ChatController {
 							...builtInExtensions,
 							nekopalExtension({
 								channel: this.adapter.name,
+								soulPath: join(this.agentDir, "SOUL.md"),
 								memory: this.memory,
 								redactor: this.redactor,
 							}),
@@ -198,10 +203,19 @@ export class ChatContext implements ChatController {
 	private customTools(): ToolDefinition[] {
 		const deliver = { channel: this.adapter.name, chatId: this.chatId };
 		return [
-			memoryTool({ store: this.memory, pending: this.pendingStore, origin: "chat" }),
+			memoryTool({
+				store: this.memory,
+				pending: this.pendingStore,
+				skillsDir: join(this.agentDir, "skills"),
+				origin: "chat",
+			}),
 			cronTool({ store: this.jobs, deliver }),
 			sendTool({ adapter: this.adapter, chatId: this.chatId, cwd: this.workspace }),
-			configSetTool({ settingsManager: this.settingsManager }),
+			configSetTool({
+				settingsManager: this.settingsManager,
+				path: join(this.agentDir, "settings.toml"),
+				backupPath: join(this.agentDir, "settings.toml.bak"),
+			}),
 		];
 	}
 
@@ -396,7 +410,7 @@ export class ChatContext implements ChatController {
 
 	/** Recent sessions of this chat, newest first. */
 	async listSessions(): Promise<SessionInfo[]> {
-		return SessionManager.list(this.workspace, join(SESSIONS_DIR, `${this.adapter.name}-${this.chatId}`));
+		return SessionManager.list(this.workspace, this.sessionDir());
 	}
 
 	async dispose(): Promise<void> {

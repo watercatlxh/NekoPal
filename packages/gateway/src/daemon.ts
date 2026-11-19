@@ -12,7 +12,7 @@ import { t } from "./i18n/index.ts";
 import { log, logError } from "./log.ts";
 import { SkillStore } from "./memory/skills.ts";
 import { MemoryStore, PendingStore } from "./memory/store.ts";
-import { CRON_DIR, MEMORY_DIR, PENDING_DIR, SESSIONS_DIR, SKILLS_DIR } from "./paths.ts";
+
 import type { StateStore } from "./state.ts";
 
 export interface DaemonOptions {
@@ -41,21 +41,31 @@ export class Daemon {
 
 	constructor(options: DaemonOptions) {
 		this.options = options;
-		for (const dir of [MEMORY_DIR, PENDING_DIR, SKILLS_DIR, SESSIONS_DIR, CRON_DIR]) {
-			mkdirSync(dir, { recursive: true });
-		}
+		// Everything lives under the configured data directory, which is `~/.nekopal` unless
+		// NEKOPAL_HOME says otherwise; an embedder may pass another one.
+		const dataDir = options.agentDir;
+		const dirs = {
+			memory: join(dataDir, "memory"),
+			pending: join(dataDir, "memory", "pending"),
+			skills: join(dataDir, "skills"),
+			sessions: join(dataDir, "sessions"),
+			cron: join(dataDir, "cron"),
+		};
+		for (const dir of Object.values(dirs)) mkdirSync(dir, { recursive: true });
 
 		const settings = options.settingsManager.getNekoPal();
 		this.state = options.state;
 		this.memory = new MemoryStore({
+			memoryPath: join(dirs.memory, "MEMORY.md"),
+			userPath: join(dirs.memory, "USER.md"),
 			budgets: {
 				memoryChars: settings.memory?.memoryChars ?? 1375,
 				userChars: settings.memory?.userChars ?? 1375,
 			},
 		});
-		this.pending = new PendingStore();
-		this.skills = new SkillStore();
-		this.jobs = new JobStore();
+		this.pending = new PendingStore(dirs.pending);
+		this.skills = new SkillStore(dirs.skills);
+		this.jobs = new JobStore(join(dirs.cron, "jobs.json"));
 
 		const redactor = { secrets: () => this.secrets() };
 		const enabledChannels = options.adapters.map((adapter) => adapter.name);
@@ -108,8 +118,6 @@ export class Daemon {
 	/** Start adapters, the scheduler and every open chat. */
 	async start(): Promise<void> {
 		this.warnEmptyAllowlists();
-		// Paths come from the configured data directory, which is `~/.nekopal` unless NEKOPAL_HOME
-		// overrides it; a test or an embedder may pass another.
 		const dataDir = this.options.agentDir;
 		setProtectedPaths([
 			{ path: join(dataDir, "settings.toml"), message: "settings.toml is protected; change it with config_set" },

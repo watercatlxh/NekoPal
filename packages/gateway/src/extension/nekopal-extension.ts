@@ -2,7 +2,6 @@ import { existsSync, readFileSync } from "node:fs";
 import type { ExtensionAPI, InlineExtension } from "@earendil-works/pi-coding-agent";
 import type { ChannelName } from "../channel/types.ts";
 import type { MemoryStore } from "../memory/store.ts";
-import { SOUL_PATH } from "../paths.ts";
 
 const CHANNEL_PROMPTS: Record<ChannelName, string> = {
 	telegram: "Telegram",
@@ -35,6 +34,8 @@ function redact(text: string, secrets: string[]): string {
 
 export interface NekoPalExtensionOptions {
 	channel: ChannelName;
+	/** `SOUL.md` to inject, when the host keeps one; absent means no soul section. */
+	soulPath?: string;
 	/** Reads SOUL.md and the memory files once per session, so a mid-session edit does not shift the cached prompt. */
 	memory: MemoryStore;
 	redactor: SecretRedactor;
@@ -55,7 +56,8 @@ export function nekopalExtension(options: NekoPalExtensionOptions): InlineExtens
 		let memoryText = "";
 
 		pi.on("session_start", () => {
-			soulText = existsSync(SOUL_PATH) ? readFileSync(SOUL_PATH, "utf-8").trim() : "";
+			const path = options.soulPath;
+			soulText = path && existsSync(path) ? readFileSync(path, "utf-8").trim() : "";
 			memoryText = options.memory.formatForPrompt();
 		});
 

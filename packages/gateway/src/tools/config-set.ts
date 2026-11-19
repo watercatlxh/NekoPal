@@ -4,7 +4,7 @@ import { defineTool, SettingsSchema } from "@earendil-works/pi-coding-agent";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 import { Type } from "typebox";
 import { Compile } from "typebox/compile";
-import { SETTINGS_BACKUP_PATH, SETTINGS_PATH } from "../paths.ts";
+import { SETTINGS_PATH } from "../paths.ts";
 
 const parameters = Type.Object({
 	key: Type.String({ description: 'Dot path such as "nekopal.memory.reviewEveryTurns" or "defaultModel"' }),
@@ -27,12 +27,15 @@ function setPath(target: Record<string, unknown>, path: string[], value: unknown
 
 export interface ConfigSetToolOptions {
 	settingsManager: SettingsManager;
+	/** `settings.toml` to edit; defaults to the process-wide data directory. */
 	path?: string;
+	backupPath?: string;
 }
 
 /** The `config_set` tool: validated, atomic edits of settings.toml. */
 export function configSetTool(options: ConfigSetToolOptions): ToolDefinition<typeof parameters> {
 	const settingsPath = options.path ?? SETTINGS_PATH;
+	const backupPath = options.backupPath ?? `${settingsPath}.bak`;
 	return defineTool({
 		name: "config_set",
 		label: "config_set",
@@ -69,7 +72,7 @@ export function configSetTool(options: ConfigSetToolOptions): ToolDefinition<typ
 				throw new Error(`Invalid settings: ${first.instancePath || "/"} ${first.message}`);
 			}
 
-			if (existsSync(settingsPath)) copyFileSync(settingsPath, SETTINGS_BACKUP_PATH);
+			if (existsSync(settingsPath)) copyFileSync(settingsPath, backupPath);
 			const temp = `${settingsPath}.tmp-${process.pid}`;
 			writeFileSync(temp, stringifyToml(next), "utf-8");
 			renameSync(temp, settingsPath);
