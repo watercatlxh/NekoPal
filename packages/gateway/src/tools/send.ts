@@ -14,6 +14,8 @@ export interface SendToolOptions {
 	adapter: Adapter;
 	chatId: string;
 	cwd: string;
+	/** The inbound message being answered, so a passive reply slot can be used where the platform has them. */
+	replyTo?: () => string | undefined;
 }
 
 /** The `send` tool: deliver a message or files to the current chat, beyond the reply itself. */
@@ -27,14 +29,15 @@ export function sendTool(options: SendToolOptions): ToolDefinition<typeof parame
 		parameters,
 		async execute(_toolCallId, params): Promise<AgentToolResult<unknown>> {
 			if (!params.text && !params.files?.length) throw new Error("Provide text or files");
-			if (params.text) await options.adapter.sendMarkdown(options.chatId, params.text);
+			const replyTo = options.replyTo?.();
+			if (params.text) await options.adapter.sendMarkdown(options.chatId, params.text, replyTo);
 			if (params.files?.length) {
 				const paths = params.files.map((file) => {
 					const path = isAbsolute(file) ? file : resolve(options.cwd, file);
 					if (!existsSync(path) || !statSync(path).isFile()) throw new Error(`No such file: ${path}`);
 					return path;
 				});
-				await options.adapter.sendFiles(options.chatId, paths);
+				await options.adapter.sendFiles(options.chatId, paths, replyTo);
 			}
 			return { content: [{ type: "text", text: "Sent." }], details: undefined };
 		},

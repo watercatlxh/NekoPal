@@ -210,7 +210,12 @@ export class ChatContext implements ChatController {
 				origin: "chat",
 			}),
 			cronTool({ store: this.jobs, deliver }),
-			sendTool({ adapter: this.adapter, chatId: this.chatId, cwd: this.workspace }),
+			sendTool({
+				adapter: this.adapter,
+				chatId: this.chatId,
+				cwd: this.workspace,
+				replyTo: () => this.replyTo,
+			}),
 			configSetTool({
 				settingsManager: this.settingsManager,
 				path: join(this.agentDir, "settings.toml"),
