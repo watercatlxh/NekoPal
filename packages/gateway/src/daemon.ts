@@ -157,8 +157,7 @@ export class Daemon {
 	private warnEmptyAllowlists(): void {
 		for (const adapter of this.options.adapters) {
 			const channels = this.options.settingsManager.getNekoPal().channels;
-			const list =
-				adapter.name === "telegram" ? channels?.telegram?.allowedUsers : channels?.qq?.allowedOpenIds;
+			const list = adapter.name === "telegram" ? channels?.telegram?.allowedUsers : channels?.qq?.allowedOpenIds;
 			if ((list ?? []).length === 0) {
 				log("warn", `${adapter.name} allowlist is empty; every message will be ignored`);
 			}
