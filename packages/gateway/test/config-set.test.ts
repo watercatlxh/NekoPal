@@ -25,7 +25,7 @@ function setup(): {
 }
 
 async function run(tool: ReturnType<typeof configSetTool>, key: string, value: string): Promise<string> {
-	const result = await tool.execute("call", { key, value });
+	const result = await tool.execute("call", { key, value }, undefined, undefined, {} as never);
 	return result.content
 		.filter((block): block is { type: "text"; text: string } => block.type === "text")
 		.map((block) => block.text)

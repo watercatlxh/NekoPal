@@ -24,7 +24,7 @@ async function run(
 	instance: ReturnType<typeof tool>["tool"],
 	params: { target: "memory" | "user" | "skill"; operations: Array<Record<string, string>> },
 ): Promise<string> {
-	const result = await instance.execute("call", params as never);
+	const result = await instance.execute("call", params as never, undefined, undefined, {} as never);
 	return result.content
 		.filter((block): block is { type: "text"; text: string } => block.type === "text")
 		.map((block) => block.text)
