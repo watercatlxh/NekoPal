@@ -73,5 +73,10 @@ export interface Adapter {
 	sendFiles(chatId: string, paths: string[], replyTo?: string): Promise<void>;
 	/** Open a platform-rendered stream for one reply, or undefined when the channel cannot stream. */
 	openStream(chatId: string, replyTo?: string): ChannelStream | undefined;
+	/**
+	 * Announce that a reply is being worked on, for platforms that show a typing indicator. A channel
+	 * without one does nothing.
+	 */
+	notifyWorking(chatId: string, replyTo?: string): Promise<void>;
 	stop(): Promise<void>;
 }

@@ -9,6 +9,8 @@ import { logError } from "../log.ts";
 const EDIT_INTERVAL_MS = 1_500;
 /** Placeholder text while the first tool runs, before any reply text exists. */
 const PLACEHOLDER = "⏳";
+/** Typing indicators expire on the platform side, so refresh them well inside that window. */
+const WORKING_REFRESH_MS = 5_000;
 /** Plain-text preview length during streaming; the final message is sent separately. */
 const PREVIEW_CHARS = 4_000;
 
@@ -38,6 +40,7 @@ export class ReplyController {
 	private lastEditAt = 0;
 	private text = "";
 	private timer: NodeJS.Timeout | undefined;
+	private workingTimer: NodeJS.Timeout | undefined;
 	private stopped = false;
 	private stream: ChannelStream | undefined;
 	private streamed = false;
@@ -87,6 +90,9 @@ export class ReplyController {
 		this.stream = this.chat.adapter.caps.stream
 			? this.chat.adapter.openStream(this.chat.chatId, this.chat.replyTo)
 			: undefined;
+		// Platforms that show a typing indicator get one as soon as the run starts.
+		await this.chat.adapter.notifyWorking(this.chat.chatId, this.chat.replyTo);
+		this.scheduleWorkingNotice();
 		if (this.stream || !this.chat.adapter.caps.edit) return;
 		this.placeholder = (await this.chat.send(PLACEHOLDER))[0];
 	}
@@ -98,6 +104,20 @@ export class ReplyController {
 		const statuses = [...this.chat.statuses.values()];
 		if (statuses.length > 0) parts.push(statuses.join(" · "));
 		return parts.join(" · ");
+	}
+
+	/** Refresh the typing indicator while the run lasts; a no-op on channels without one. */
+	private scheduleWorkingNotice(): void {
+		if (this.workingTimer) return;
+		this.workingTimer = setInterval(() => {
+			void this.chat.adapter.notifyWorking(this.chat.chatId, this.chat.replyTo);
+		}, WORKING_REFRESH_MS);
+		this.workingTimer.unref();
+	}
+
+	private stopWorkingNotice(): void {
+		clearInterval(this.workingTimer);
+		this.workingTimer = undefined;
 	}
 
 	/** Push the newest text at most once per interval, to the stream or the placeholder. */
@@ -150,6 +170,7 @@ export class ReplyController {
 	/** Finish the reply: end the stream, replace the placeholder, or send the Markdown. */
 	private async finalize(markdown: string, plain: boolean): Promise<void> {
 		this.stopped = true;
+		this.stopWorkingNotice();
 		clearTimeout(this.timer);
 		this.timer = undefined;
 		const stream = this.stream;
@@ -170,6 +191,7 @@ export class ReplyController {
 	}
 
 	private async settle(): Promise<void> {
+		this.stopWorkingNotice();
 		clearTimeout(this.timer);
 		this.timer = undefined;
 		this.stream?.abort();

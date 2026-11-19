@@ -138,6 +138,29 @@ export class QqAdapter implements Adapter, QqQuotaReporter {
 		return handles;
 	}
 
+	/**
+	 * QQ's input-notify frame, which shows "typing" for up to a minute. It costs a passive slot, so it
+	 * is sent only when at least three remain: the reply itself needs the others.
+	 */
+	async notifyWorking(chatId: string, replyTo?: string): Promise<void> {
+		const api = this.api;
+		const sourceId = replyTo === "" ? undefined : replyTo;
+		if (!api || sourceId === undefined) return;
+		if (this.passive.remaining(sourceId, Date.now()) < 3) return;
+		const msgSeq = this.passive.takePassive(sourceId, Date.now());
+		if (msgSeq === undefined) return;
+		try {
+			await this.post(api, chatId, {
+				msg_type: 6,
+				input_notify: { input_type: 1, input_second: 60 },
+				msg_id: sourceId,
+				msg_seq: msgSeq,
+			});
+		} catch (error) {
+			this.options.logError("qq: could not send the input notify", error);
+		}
+	}
+
 	/** A `stream_messages` reply, when `nekopal.channels.qq.stream` is on and a reply slot is free. */
 	openStream(chatId: string, replyTo?: string): ChannelStream | undefined {
 		const api = this.api;

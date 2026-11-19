@@ -258,6 +258,15 @@ class TelegramAdapter implements Adapter {
 		}
 	}
 
+	/** Telegram's typing indicator, refreshed by the caller's progress timer. */
+	async notifyWorking(chatId: string): Promise<void> {
+		try {
+			await this.api.call("sendChatAction", { chat_id: chatId, action: "typing" });
+		} catch (error) {
+			this.options.logError("telegram: could not send the typing action", error);
+		}
+	}
+
 	/**
 	 * Telegram has no platform-rendered stream: the reply layer edits a placeholder instead, so this
 	 * returns undefined and the placeholder path runs.
