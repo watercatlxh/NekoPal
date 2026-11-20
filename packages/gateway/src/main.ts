@@ -1,7 +1,14 @@
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
+import {
+	applyHttpProxySettings,
+	configureHttpDispatcher,
+	DEFAULT_HTTP_IDLE_TIMEOUT_MS,
+	ModelRuntime,
+	parseHttpIdleTimeoutMs,
+	SettingsManager,
+} from "@earendil-works/pi-coding-agent";
 import type { Adapter } from "./channel/types.ts";
 import { commandMenu } from "./commands/table.ts";
 import { Daemon } from "./daemon.ts";
@@ -59,7 +66,12 @@ async function main(): Promise<number> {
 	}
 
 	mkdirSync(HOME, { recursive: true });
+	// The daemon talks to the Bot APIs over fetch, which does not read HTTP_PROXY itself. Install the
+	// proxy-aware dispatcher before anything makes a request; without it a proxied host reaches nothing.
 	const settingsManager = SettingsManager.create(HOME, HOME);
+	const rawSettings = settingsManager.getSettings();
+	applyHttpProxySettings(rawSettings.httpProxy);
+	configureHttpDispatcher(parseHttpIdleTimeoutMs(rawSettings.httpIdleTimeoutMs) ?? DEFAULT_HTTP_IDLE_TIMEOUT_MS);
 	const settings = settingsManager.getNekoPal();
 	const state = StateStore.load(join(HOME, "state.json"));
 	const adapters = await createAdapters(settingsManager, state, commandMenu(settings.defaultLang ?? "en"));
