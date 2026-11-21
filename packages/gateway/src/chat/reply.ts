@@ -1,8 +1,14 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
-import { details, fence } from "../channel/telegram/rich.ts";
-import type { Adapter, ChannelStream, Keyboard, SentHandle } from "../channel/types.ts";
-import type { Lang, MessageKey } from "../i18n/index.ts";
+import { RICH_LIMIT } from "../channel/telegram/rich.ts";
+import {
+	type Adapter,
+	type ChannelStream,
+	type ReplyFormat,
+	type SentHandle,
+	ToolCallRejected,
+} from "../channel/types.ts";
+import type { Lang } from "../i18n/index.ts";
 import { t } from "../i18n/index.ts";
 import { logError } from "../log.ts";
 import { formatToolLine, resultText, summarizeArgs, type ToolLine, toolBody } from "./tool-summary.ts";
@@ -15,289 +21,326 @@ const FIRST_SEND_DELAY_MS = 400;
 const MAX_SUMMARY_LINES = 3;
 /** Typing indicators expire on the platform side, so refresh them well inside that window. */
 const WORKING_REFRESH_MS = 5_000;
-/** Plain-text preview length during streaming; the final message is sent separately. */
-const PREVIEW_CHARS = 4_000;
+/** Keep previews (including a rejected rich send's Markdown fallback) inside one source chunk. */
+const PREVIEW_CHARS = 3_500;
 
-/** One tool call and the message it owns. */
-interface ToolEntry {
-	readonly id: string;
-	readonly name: string;
+interface ToolEntry extends ToolLine {
 	readonly args: unknown;
-	readonly summary: string;
-	status: "running" | "ok" | "error";
-	/** The message showing this call; absent on channels that cannot edit. */
-	handle?: SentHandle;
-	result?: string;
+	/** The first send, which may still be in flight when the agent reports the result. */
+	initial?: Promise<SentHandle>;
 }
 
-/**
- * Turns session events into chat messages.
- *
- * Two rendering paths, chosen by `caps`:
- *
- * - **Editable, rich channel (Telegram)**: every tool call gets its own message, sent when the call
- *   starts and edited when it ends, with the arguments and output folded behind a `<details>`
- *   summary. The reply text is a separate message, created on the first delta and edited in place
- *   until it is final. Nothing is ever deleted except a reply that outgrew one message.
- * - **Streaming channel (QQ)**: no edits and a tight reply budget, so the calls collapse into one
- *   summary message and the reply goes out through the platform's stream.
- */
+/** State for exactly one assistant message, retained by its queued finalizer. */
+interface AssistantOutput {
+	text: string;
+	stream?: ChannelStream;
+	handle?: SentHandle;
+	previewAttempted: boolean;
+	shown?: string;
+	lastFlushAt?: number;
+	timer?: NodeJS.Timeout;
+	flushPending: boolean;
+}
+
+/** Events are not awaited by the agent. Take ownership synchronously and serialize only delivery. */
 export class ReplyController {
 	private readonly chat: ChatController;
-	/** The reply text's message, on channels that can edit it. */
-	private handle: SentHandle | undefined;
-	private tools: ToolEntry[] = [];
-	private lastEditAt = 0;
-	private firstFlush = true;
-	/** Whether a channel without editable messages already got its one tool-summary message. */
-	private noticeSent = false;
-	private text = "";
-	private timer: NodeJS.Timeout | undefined;
-	private workingTimer: NodeJS.Timeout | undefined;
-	private stopped = false;
-	private stream: ChannelStream | undefined;
+	private run?: RunDelivery;
 
 	constructor(chat: ChatController) {
 		this.chat = chat;
 	}
 
-	/** Translate with the chat's current language. */
-	private message(key: MessageKey, vars?: Record<string, string | number>): string {
-		return t(this.chat.lang, key, vars);
-	}
-
 	async onEvent(event: AgentSessionEvent): Promise<void> {
-		switch (event.type) {
-			case "agent_start":
-				await this.begin();
-				return;
-			case "tool_execution_start": {
-				// A call a tool made through `executeTool` belongs to its parent's message.
-				if (event.parentToolCallId !== undefined) return;
-				const entry: ToolEntry = {
-					id: event.toolCallId,
-					name: event.toolName,
-					args: event.args,
-					summary: summarizeArgs(event.toolName, event.args),
-					status: "running",
-				};
-				this.tools.push(entry);
-				await this.toolStarted(entry);
-				return;
-			}
-			case "tool_execution_end": {
-				if (event.parentToolCallId !== undefined) return;
-				const entry = this.tools.find((candidate) => candidate.id === event.toolCallId);
-				if (!entry) return;
-				entry.status = event.isError ? "error" : "ok";
-				entry.result = resultText(event.result);
-				await this.toolFinished(entry);
-				return;
-			}
-			case "message_update":
-				if (event.assistantMessageEvent.type === "text_delta") {
-					this.text += event.assistantMessageEvent.delta;
-					this.scheduleProgress();
-				}
-				return;
-			case "message_end":
-				if (event.message.role === "assistant") await this.finishMessage(event.message);
-				return;
-			case "agent_settled":
-				await this.settle();
-				return;
-		}
-	}
-
-	private async begin(): Promise<void> {
-		this.stopped = false;
-		this.text = "";
-		this.tools = [];
-		this.handle = undefined;
-		this.lastEditAt = 0;
-		this.firstFlush = true;
-		this.noticeSent = false;
-		this.stream = this.chat.adapter.caps.stream
-			? this.chat.adapter.openStream(this.chat.chatId, this.chat.replyTo)
-			: undefined;
-		// Platforms that show a typing indicator get one as soon as the run starts.
-		await this.chat.adapter.notifyWorking(this.chat.chatId, this.chat.replyTo);
-		this.scheduleWorkingNotice();
-	}
-
-	/**
-	 * The fold for one call: `emoji name · summary` stays visible, the arguments and output hide
-	 * behind a `<details>` whose summary is just the toggle word.
-	 */
-	private fold(entry: ToolEntry): string {
-		const marker = entry.status === "ok" ? "✓" : entry.status === "error" ? "✗" : "🔧";
-		const head =
-			entry.summary === "" ? `${marker} **${entry.name}**` : `${marker} **${entry.name}** · ${entry.summary}`;
-		const body = toolBody(entry.args, entry.result ?? "");
-		const toggle = this.message(entry.status === "error" ? "reply.foldFailed" : "reply.fold");
-		return `${head}\n${details(toggle, body === "" ? "" : fence("", body))}`;
-	}
-
-	/** A call started: on an editable rich channel it gets a message of its own, folded. */
-	private async toolStarted(entry: ToolEntry): Promise<void> {
-		if (this.stopped) return;
-		if (!this.chat.adapter.caps.edit || !this.chat.adapter.caps.rich) {
-			// A channel without edits cannot rewrite the message, so the calls share one summary
-			// message sent after the first delay, and a long run is summarised once.
-			this.scheduleProgress();
+		if (event.type === "agent_start") {
+			void this.run?.settle();
+			this.run = new RunDelivery(this.chat);
 			return;
 		}
-		try {
-			entry.handle = await this.chat.sendRich(this.fold(entry), this.chat.replyTo);
-		} catch (error) {
-			logError("could not send the tool message", error);
+		const run = this.run;
+		if (event.type === "agent_settled") {
+			this.run = undefined;
+			await run?.settle();
+		} else {
+			await run?.onEvent(event);
 		}
 	}
+}
 
-	/** A call ended: rewrite its own message with the output and the final marker. */
-	private async toolFinished(entry: ToolEntry): Promise<void> {
-		if (this.stopped) return;
-		const handle = entry.handle;
-		if (handle === undefined) {
-			this.scheduleProgress();
-			return;
-		}
-		try {
-			await this.chat.editRich(handle, this.fold(entry));
-		} catch (error) {
-			logError("could not update the tool message", error);
-		}
-	}
+class RunDelivery {
+	private readonly adapter: Adapter;
+	private readonly chatId: string;
+	private readonly replyTo: string | undefined;
+	private readonly lang: Lang;
+	private readonly format: ReplyFormat;
+	private readonly tools = new Map<string, ToolEntry>();
+	private tail = Promise.resolve();
+	private output?: AssistantOutput;
+	private readonly workingTimer: NodeJS.Timeout;
+	private summaryTimer?: NodeJS.Timeout;
+	private summarySent = false;
+	private stopped = false;
 
-	/** The call lines a channel without per-call messages shows, newest first. */
-	private summaryLines(): string[] {
-		const shown = this.tools.slice(0, MAX_SUMMARY_LINES);
-		const overflow = this.tools.length - shown.length;
-		const lines: string[] = [this.message("reply.tools", { n: this.tools.length })];
-		for (const entry of shown) lines.push(formatToolLine(entry as ToolLine));
-		if (overflow > 0) lines.push(this.message("reply.toolsMore", { n: overflow }));
-		return lines;
-	}
-
-	/** Refresh the typing indicator while the run lasts; a no-op on channels without one. */
-	private scheduleWorkingNotice(): void {
-		if (this.workingTimer) return;
-		this.workingTimer = setInterval(() => {
-			void this.chat.adapter.notifyWorking(this.chat.chatId, this.chat.replyTo);
-		}, WORKING_REFRESH_MS);
+	constructor(chat: ChatController) {
+		// ChatContext.replyTo can change while a delivery from this run is still pending.
+		this.adapter = chat.adapter;
+		this.chatId = chat.chatId;
+		this.replyTo = chat.replyTo;
+		this.lang = chat.lang;
+		this.format = this.adapter.name === "telegram" && chat.telegramReplyFormat === "mdv2" ? "mdv2" : "rich";
+		// Reserve QQ's final reply slot before a typing notice or tool summary can spend it.
+		if (this.adapter.caps.stream && !this.adapter.caps.edit) this.currentOutput();
+		const notify = () =>
+			this.adapter.notifyWorking(this.chatId, this.replyTo).catch((error: unknown) => {
+				logError("could not send the working notice", error);
+			});
+		void notify();
+		this.workingTimer = setInterval(notify, WORKING_REFRESH_MS);
 		this.workingTimer.unref();
 	}
 
-	private stopWorkingNotice(): void {
-		clearInterval(this.workingTimer);
-		this.workingTimer = undefined;
+	private enqueue<T>(operation: string, deliver: () => Promise<T>): Promise<T> {
+		const result = this.tail.then(deliver);
+		// One failure must not poison subsequent deliveries. Retain the original promise for
+		// operations (notably tool edits) that need to distinguish a rejection from a timeout.
+		this.tail = result.then(
+			() => undefined,
+			(error: unknown) => logError(operation, error),
+		);
+		return result;
 	}
 
-	/** Push the newest reply text at most once per interval. */
-	private scheduleProgress(): void {
-		if (this.timer) return;
-		const interval = this.firstFlush ? FIRST_SEND_DELAY_MS : EDIT_INTERVAL_MS;
-		const wait = Math.max(0, this.lastEditAt + interval - Date.now());
-		this.timer = setTimeout(() => {
-			this.timer = undefined;
-			void this.flushProgress();
-		}, wait);
-		this.timer.unref();
+	onEvent(event: AgentSessionEvent): Promise<void> | void {
+		if (this.stopped) return this.tail;
+		switch (event.type) {
+			case "tool_execution_start":
+				if (event.parentToolCallId === undefined) this.toolStarted(event.toolCallId, event.toolName, event.args);
+				break;
+			case "tool_execution_end":
+				if (event.parentToolCallId === undefined) this.toolFinished(event.toolCallId, event.result, event.isError);
+				break;
+			case "message_update":
+				if (event.assistantMessageEvent.type === "text_delta") {
+					const delta = event.assistantMessageEvent.delta;
+					const output = this.currentOutput();
+					output.text += delta;
+					if (output.lastFlushAt !== undefined || delta.trim() !== "") this.scheduleProgress(output);
+				}
+				return; // Buffering a delta never waits for network I/O.
+			case "message_end":
+				if (event.message.role === "assistant") this.finishMessage(event.message);
+				break;
+		}
+		return this.tail;
 	}
 
-	private async flushProgress(): Promise<void> {
-		if (this.stopped) return;
-		this.lastEditAt = Date.now();
-		this.firstFlush = false;
-		if (this.stream) {
-			// No edits on this path, so the calls share one message. It waits for the first call to
-			// finish: sent at the start it would only ever show a running marker.
-			const settled = this.tools.some((entry) => entry.status !== "running");
-			if (!this.chat.adapter.caps.edit && !this.noticeSent && settled) {
-				this.noticeSent = true;
-				await this.chat.sendPlain(this.summaryLines().join("\n"));
+	private toolStarted(id: string, name: string, args: unknown): void {
+		if (this.tools.has(id)) return;
+		const entry: ToolEntry = { id, name, args, summary: summarizeArgs(name, args), status: "running" };
+		this.tools.set(id, entry);
+		const { adapter, chatId, replyTo } = this;
+		const send = adapter.sendToolCall;
+		if (send && adapter.editToolCall) {
+			entry.initial = this.enqueue("could not send the tool message", () =>
+				send.call(adapter, chatId, name, toolBody(args, ""), replyTo),
+			);
+		}
+	}
+
+	private toolFinished(id: string, result: unknown, failed: boolean): void {
+		const entry = this.tools.get(id);
+		if (entry?.status !== "running") return;
+		entry.status = failed ? "error" : "ok";
+		const initial = entry.initial;
+		if (!initial) {
+			if (!this.summarySent && !this.summaryTimer) {
+				this.summaryTimer = setTimeout(() => this.queueSummary(), FIRST_SEND_DELAY_MS);
+				this.summaryTimer.unref();
 			}
-			if (this.text.trim().length === 0) return;
-			await this.stream.update(this.text);
 			return;
 		}
-		if (!this.chat.adapter.caps.edit) return;
-		const preview = this.text.slice(-PREVIEW_CHARS);
-		if (preview.trim() === "") return;
-		const handle = this.handle;
-		if (handle === undefined) {
-			this.handle = await this.chat.sendRich(preview, this.chat.replyTo);
-			return;
-		}
-		try {
-			await this.chat.adapter.editText(this.chat.chatId, handle, preview);
-		} catch (error) {
-			logError("could not update the reply message", error);
-		}
+		const { adapter, chatId, replyTo, lang } = this;
+		void this.enqueue("could not finish the tool message", async () => {
+			const details = toolBody(entry.args, resultText(result), failed ? t(lang, "reply.toolFailed") : undefined);
+			let handle: SentHandle | undefined;
+			try {
+				handle = await initial;
+			} catch (error) {
+				if (!(error instanceof ToolCallRejected)) return; // Ambiguous delivery; never duplicate it.
+			}
+			if (handle && (await adapter.editToolCall!(chatId, handle, entry.name, details))) return;
+			await adapter.sendToolCall!(chatId, entry.name, details, replyTo);
+		});
 	}
 
-	private async finishMessage(message: AssistantMessage): Promise<void> {
-		const text = message.content
-			.filter((block) => block.type === "text")
-			.map((block) => block.text)
-			.join("");
-		if (message.stopReason === "error") {
-			await this.finalize(this.message("error.run", { message: message.errorMessage ?? "unknown error" }), true);
-			return;
+	/** On QQ the completed calls share one plain summary, even without a native stream. */
+	private queueSummary(): void {
+		clearTimeout(this.summaryTimer);
+		this.summaryTimer = undefined;
+		if (this.summarySent || (this.adapter.sendToolCall && this.adapter.editToolCall)) return;
+		const entries = Array.from(this.tools.values());
+		if (!entries.some((entry) => entry.status !== "running")) return;
+		this.summarySent = true;
+		const shown = entries.slice(0, MAX_SUMMARY_LINES);
+		const lines = [t(this.lang, "reply.tools", { n: entries.length }), ...shown.map(formatToolLine)];
+		if (shown.length < entries.length) {
+			lines.push(t(this.lang, "reply.toolsMore", { n: entries.length - shown.length }));
 		}
-		if (message.stopReason === "aborted") {
-			await this.finalize(this.message("run.stopped"), true);
-			return;
-		}
-		if (text.trim().length === 0) return;
-		await this.finalize(text, false);
+		void this.enqueue("could not send the tool summary", () =>
+			this.adapter.sendMarkdown(this.chatId, lines.join("\n"), this.replyTo),
+		);
 	}
 
-	/** Finish the reply: end the stream, edit the reply message in place, or send it. */
-	private async finalize(markdown: string, plain: boolean): Promise<void> {
-		this.stopped = true;
-		this.stopWorkingNotice();
-		clearTimeout(this.timer);
-		this.timer = undefined;
-		const stream = this.stream;
-		this.stream = undefined;
-		if (stream) {
-			// The stream already claimed a reply slot, so finishing it is what delivers the reply.
-			if (!plain && (await stream.finish(markdown)) !== undefined) return;
-			stream.abort();
+	private currentOutput(): AssistantOutput {
+		this.output ??= {
+			text: "",
+			previewAttempted: false,
+			flushPending: false,
+			stream: this.adapter.caps.stream ? this.adapter.openStream(this.chatId, this.replyTo) : undefined,
+		};
+		return this.output;
+	}
+
+	private scheduleProgress(output: AssistantOutput): void {
+		if (output.timer || output.flushPending || (!output.stream && !this.adapter.caps.edit)) return;
+		if (output.previewAttempted && !output.handle) return;
+		const wait =
+			output.lastFlushAt === undefined
+				? FIRST_SEND_DELAY_MS
+				: Math.max(0, output.lastFlushAt + EDIT_INTERVAL_MS - Date.now());
+		output.timer = setTimeout(() => {
+			output.timer = undefined;
+			output.flushPending = true;
+			void this.enqueue("could not deliver the reply preview", async () => {
+				if (output !== this.output) return; // A final arrived before this flush got its turn.
+				output.lastFlushAt = Date.now();
+				const text = output.text;
+				try {
+					await this.flushProgress(output, text);
+				} finally {
+					output.flushPending = false;
+					if (output === this.output && output.text !== text) this.scheduleProgress(output);
+				}
+			});
+		}, wait);
+		output.timer.unref();
+	}
+
+	/** Pass original Markdown to the adapter; it owns rendering and any parse fallback. */
+	private async sendAnswer(text: string): Promise<SentHandle | undefined> {
+		const { adapter, chatId, replyTo } = this;
+		if (this.format === "rich" && adapter.caps.rich && text.length <= RICH_LIMIT) {
+			return adapter.sendRich(chatId, text, replyTo);
 		}
-		const handle = this.handle;
-		this.handle = undefined;
-		if (handle !== undefined) {
-			const edited = plain
-				? await this.chat.adapter
-						.editText(this.chat.chatId, handle, markdown)
-						.then(() => true)
-						.catch((error: unknown) => {
-							logError("could not finalize the reply message", error);
-							return false;
-						})
-				: await this.chat.editRich(handle, markdown).catch((error: unknown) => {
-						logError("could not finalize the reply message", error);
-						return false;
-					});
-			if (edited) return;
-			await this.chat.deleteMessage(handle);
+		return (await adapter.sendMarkdown(chatId, text, replyTo))[0];
+	}
+
+	private editAnswer(handle: SentHandle, text: string): Promise<boolean> {
+		const { adapter, chatId } = this;
+		return this.format === "mdv2"
+			? (adapter.editMarkdown?.(chatId, handle, text) ?? Promise.resolve(false))
+			: adapter.editRich(chatId, handle, text);
+	}
+
+	private async flushProgress(output: AssistantOutput, text: string): Promise<void> {
+		if (output.stream) {
+			await output.stream.update(text);
+			return;
 		}
+		let end = Math.min(PREVIEW_CHARS, this.adapter.caps.maxChars, text.length);
+		if (end < text.length && /[\uD800-\uDBFF]/.test(text.charAt(end - 1))) end--;
+		const preview = text.slice(0, end);
+		if (preview === output.shown || preview.trim() === "") return;
+		if (output.handle) {
+			// A timed-out edit may still have changed the remote text. Only deduplicate against
+			// an acknowledged edit, never against what was visible before that request.
+			output.shown = undefined;
+			if (!(await this.editAnswer(output.handle, preview))) return;
+		} else {
+			if (output.previewAttempted) return;
+			output.previewAttempted = true;
+			output.handle = await this.sendAnswer(preview);
+		}
+		output.shown = preview;
+	}
+
+	private detachOutput(): AssistantOutput | undefined {
+		const output = this.output;
+		this.output = undefined;
+		clearTimeout(output?.timer);
+		return output;
+	}
+
+	private finishMessage(message: AssistantMessage): void {
+		const plain = message.stopReason === "error" || message.stopReason === "aborted";
+		let text: string;
 		if (plain) {
-			await this.chat.sendPlain(markdown);
+			this.stop();
+			text =
+				message.stopReason === "error"
+					? t(this.lang, "error.run", { message: message.errorMessage ?? "unknown error" })
+					: t(this.lang, "run.stopped");
+		} else {
+			text = message.content
+				.filter((block) => block.type === "text")
+				.map((block) => block.text)
+				.join("");
+		}
+		// Lock the final now; neither a later delta nor settle may clear this output's pending handle.
+		if (text.trim() === "") {
+			if (this.output?.text) this.discardOutput(); // Otherwise keep any reserved QQ slot.
 			return;
 		}
-		await this.chat.send(markdown);
+		if (!plain) this.currentOutput();
+		const output = this.detachOutput();
+		this.queueSummary();
+		void this.enqueue("could not finalize the reply message", () => this.finalize(output, text, plain));
 	}
 
-	private async settle(): Promise<void> {
-		this.stopWorkingNotice();
-		clearTimeout(this.timer);
-		this.timer = undefined;
-		this.stream?.abort();
-		this.stream = undefined;
-		this.handle = undefined;
+	private async finalize(output: AssistantOutput | undefined, text: string, plain: boolean): Promise<void> {
+		const { adapter, chatId, replyTo } = this;
+		if (output?.stream) {
+			if (!plain && (await output.stream.finish(text)) !== undefined) return;
+			output.stream.abort();
+		}
+		const handle = output?.handle;
+		if (!handle && output?.previewAttempted) return; // A timed-out initial send may have succeeded.
+		if (handle) {
+			if (plain) {
+				await adapter.editText(chatId, handle, text);
+				return;
+			}
+			if (output.shown === text || (await this.editAnswer(handle, text))) return;
+			// An explicit false (not an exception) permits replacement. Retain the preview if sending fails.
+			const sent = await adapter.sendMarkdown(chatId, text, replyTo);
+			if (sent.length > 0) await adapter.deleteMessage(chatId, handle);
+		} else if (plain) {
+			await adapter.sendMarkdown(chatId, text, replyTo);
+		} else {
+			await this.sendAnswer(text);
+		}
+	}
+
+	private stop(): void {
+		this.stopped = true;
+		clearInterval(this.workingTimer);
+	}
+
+	private discardOutput(): void {
+		const output = this.detachOutput();
+		if (!output || (!output.stream && !output.previewAttempted)) return;
+		// A send already in flight can still return its handle after an empty final or settle.
+		void this.enqueue("could not discard the reply preview", async () => {
+			output.stream?.abort();
+			if (output.handle) await this.adapter.deleteMessage(this.chatId, output.handle);
+		});
+	}
+
+	settle(): Promise<void> {
+		this.stop();
+		this.discardOutput();
+		this.queueSummary();
+		return this.tail;
 	}
 }
 
@@ -308,11 +351,5 @@ export interface ChatController {
 	/** Message id of the inbound message, so a reply can take a passive slot. */
 	readonly replyTo: string | undefined;
 	readonly lang: Lang;
-	send(markdown: string): Promise<SentHandle[]>;
-	sendPlain(text: string): Promise<void>;
-	/** Send one message as rich Markdown, with optional buttons. */
-	sendRich(markdown: string, replyTo?: string, keyboard?: Keyboard): Promise<SentHandle>;
-	/** Replace a message with rich Markdown; false when it does not fit or cannot be edited. */
-	editRich(handle: SentHandle, markdown: string, keyboard?: Keyboard): Promise<boolean>;
-	deleteMessage(handle: SentHandle): Promise<void>;
+	readonly telegramReplyFormat?: ReplyFormat;
 }

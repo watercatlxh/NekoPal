@@ -1,11 +1,13 @@
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { SettingsManager } from "@earendil-works/pi-coding-agent";
+import { describe, expect, it, vi } from "vitest";
 import { keyboardToMarkup as qqKeyboard } from "../src/channel/qq/keyboard.ts";
+import { createTelegramAdapter } from "../src/channel/telegram/adapter.ts";
 import { keyboardToMarkup as tgKeyboard } from "../src/channel/telegram/rich.ts";
 import type { Keyboard } from "../src/channel/types.ts";
-import { decode, navButton, runButton, toKeyboard } from "../src/panel/encode.ts";
+import { decode, navButton, panelKey, pendingKey, runButton, toKeyboard } from "../src/panel/encode.ts";
 import { type PanelSnapshot, renderPage } from "../src/panel/model.ts";
 import {
 	listCustomProviders,
@@ -39,6 +41,7 @@ const snapshot: PanelSnapshot = {
 	],
 	pending: 1,
 	pendingLines: "1. [memory] prefers Chinese (abc)",
+	pendingKey: pendingKey(["abc"]),
 	jobs: [
 		{
 			id: "a1b2c3d4e5",
@@ -64,15 +67,15 @@ describe("panel encoding", () => {
 	it("keeps every payload inside Telegram's 64-byte cap", () => {
 		const buttons = [
 			navButton("Models", "mdl"),
-			runButton("Pause", "job", "pause", "a1b2c3d4e5f6", "/jobs pause a1b2c3d4e5f6"),
-			runButton("Forget", "mem", "fg", "12", "/memory forget 12"),
+			runButton("Pause", "job", "pause", "a1b2c3d4e5f6"),
+			runButton("Forget", "mem", "fg", "12"),
 		];
 		for (const button of buttons) expect(Buffer.byteLength(button.data)).toBeLessThanOrEqual(64);
 	});
 
 	it("round-trips a navigation press and a command press", () => {
 		expect(decode(navButton("Models", "mdl").data)).toEqual({ page: "mdl", verb: "nav", arg: "" });
-		expect(decode(runButton("Forget", "mem", "fg", "3", "/memory forget 3").data)).toEqual({
+		expect(decode(runButton("Forget", "mem", "fg", "3").data)).toEqual({
 			page: "mem",
 			verb: "fg",
 			arg: "3",
@@ -82,6 +85,9 @@ describe("panel encoding", () => {
 	it("rejects a payload it did not encode", () => {
 		expect(decode("nonsense")).toBeUndefined();
 		expect(decode("nav:nowhere")).toBeUndefined();
+		expect(decode("nav:constructor")).toBeUndefined();
+		expect(decode("__proto__:rm:0")).toBeUndefined();
+		expect(decode("nav:mdl:extra")).toBeUndefined();
 	});
 });
 
@@ -91,31 +97,22 @@ describe("panel pages", () => {
 		expect(view.text).toContain("moefox/deepseek");
 		expect(view.text).toContain("Pending 1");
 		const data = view.rows.flat().map((button) => button.data);
-		expect(data).toEqual([
-			"nav:mdl",
-			"nav:pvd",
-			"nav:ses",
-			"nav:pkg",
-			"nav:mem",
-			"nav:job",
-			"set:lang:zh",
-			"set:lang:en",
-		]);
+		expect(data).toEqual(["nav:ses", "nav:mdl", "nav:mem", "nav:job", "nav:sys", "set:close"]);
 	});
 
 	it("picks the provider first, then marks the current model in its list", () => {
 		// The root lists configured providers, marking the one that owns the current model.
 		const root = renderPage("mdl", snapshot);
 		const data = root.rows.flat().map((button) => button.data);
-		expect(data).toContain("mdl:pvd:moefox");
+		expect(data).toContain(`mdl:pvd:${panelKey(["moefox"])}`);
 		// The provider page lists its models and marks the current one.
 		const list = renderPage("mdl", snapshot, "moefox");
 		const labels = list.rows.flat().map((button) => button.label);
 		expect(labels).toContain("✅ deepseek");
 		expect(labels).toContain("other");
-		// A model button carries provider:index, which /model resolves to that exact entry.
+		// A model button identifies the full provider/model pair.
 		const setData = list.rows.flat().map((button) => button.data);
-		expect(setData).toContain("mdl:set:moefox:0");
+		expect(setData).toContain(`mdl:set:${panelKey(["moefox", "deepseek"])}`);
 	});
 
 	it("shows provider state, a custom-api button and a delete for custom providers", () => {
@@ -124,8 +121,8 @@ describe("panel pages", () => {
 		expect(view.text).toContain("⬜ anthropic");
 		const data = view.rows.flat().map((button) => button.data);
 		expect(data).toContain("pvd:add");
-		expect(data).toContain("pvd:rm:moefox");
-		expect(data).not.toContain("pvd:rm:anthropic");
+		expect(data).toContain(`pvd:rm:${panelKey(["moefox"])}`);
+		expect(data).not.toContain(`pvd:rm:${panelKey(["anthropic"])}`);
 	});
 
 	it("reports local usage on the sessions page", () => {
@@ -135,15 +132,43 @@ describe("panel pages", () => {
 	it("offers a forget button per stored memory and a back button", () => {
 		const view = renderPage("mem", snapshot);
 		const data = view.rows.flat().map((button) => button.data);
-		expect(data).toContain("mem:fg:1");
-		expect(data).toContain("mem:fg:2");
+		expect(data).toContain(`mem:fg:${panelKey(["memory", "likes tea"])}`);
+		expect(data).toContain(`mem:fg:${panelKey(["user", "in Asia/Shanghai"])}`);
 		expect(data.at(-1)).toBe("nav:set");
 	});
 
 	it("lists installed packages with a delete button each", () => {
 		const view = renderPage("pkg", snapshot);
 		expect(view.text).toContain("github.com/x/y");
-		expect(view.rows.flat().map((button) => button.data)).toContain("pkg:rm:0");
+		expect(view.rows.flat().map((button) => button.data)).toContain(`pkg:rm:${panelKey(["github.com/x/y"])}`);
+	});
+
+	it.each(["en", "zh"] as const)("keeps the last model, provider, package and job reachable in %s", (lang) => {
+		const models = Array.from({ length: 13 }, (_, i) => `model-${i}`);
+		const packages = Array.from({ length: 7 }, (_, i) => `/p/${i}`);
+		const providers = packages.map((_, i) => ({ id: `provider-${i}`, configured: true, custom: true }));
+		const jobs = Array.from({ length: 4 }, (_, i) => ({ ...snapshot.jobs[0], id: `job-${i}` }));
+		const state = { ...snapshot, lang, packages, providers, jobs, modelsByProvider: [{ id: "moefox", models }] };
+		for (const [page, initial, prefix, last, parent] of [
+			["mdl", "moefox", `mdl:pg:${panelKey(["moefox"])}:`, `mdl:set:${panelKey(["moefox", models[12]])}`, "mdl"],
+			["pvd", "", "pg:pvd:", `pvd:rm:${panelKey([providers[6].id])}`, "mdl"],
+			["pkg", "", "pg:pkg:", `pkg:rm:${panelKey([packages[6]])}`, "sys"],
+			["job", "", "pg:job:", `job:rm:${panelKey([jobs[3].id])}`, "set"],
+		] as const) {
+			let view = renderPage(page, state, initial);
+			for (let index = 1; ; index++) {
+				const wire = qqKeyboard(toKeyboard(view.rows))?.content.rows.flatMap((row) =>
+					row.buttons.map((button) => button.action.data),
+				);
+				expect(wire).toEqual(view.rows.flat().map((button) => button.command));
+				expect(view.rows.at(-1)?.at(-1)?.data).toBe(`nav:${parent}`);
+				const next = view.rows.flat().find((button) => button.data === `${prefix}${index}`);
+				if (!next) break;
+				const press = decode(next.data)!;
+				view = renderPage(page, state, page === "mdl" ? `${initial} ${press.arg.split(":")[1]}` : press.arg);
+			}
+			expect(view.rows.flat().map((button) => button.data)).toContain(last);
+		}
 	});
 
 	it("gives the settings page no back button", () => {
@@ -159,21 +184,71 @@ describe("keyboards", () => {
 
 	it("maps buttons onto Telegram inline keys", () => {
 		const markup = tgKeyboard(keyboard);
-		expect(markup?.inline_keyboard[0][0]).toEqual({ text: "✅ Approve all", callback_data: "mem:ok:all" });
+		expect(markup?.inline_keyboard.flat().find((button) => button.text === "✅ Approve all")?.callback_data).toBe(
+			`mem:ok:${snapshot.pendingKey}`,
+		);
+	});
+
+	it("posts literal Telegram panel text with its keyboard and retries only absent edits as new pages", async () => {
+		const send = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({ ok: true, result: { message_id: 71 } }));
+		vi.stubGlobal("fetch", send);
+		try {
+			const adapter = createTelegramAdapter({
+				settingsManager: SettingsManager.inMemory({
+					nekopal: { channels: { telegram: { botToken: "test-only" } } },
+				}),
+				log: vi.fn(),
+				logError: vi.fn(),
+			});
+			const handle = await adapter.sendRich("42", "plain * and <", "9", keyboard);
+			expect(handle).toEqual({ id: "71" });
+			const [url, request] = send.mock.calls[0];
+			expect(String(url)).toMatch(/\/sendMessage$/);
+			expect(JSON.parse(String(request?.body))).toEqual({
+				chat_id: "42",
+				text: "plain * and <",
+				reply_markup: tgKeyboard(keyboard),
+				reply_parameters: { message_id: 9, allow_sending_without_reply: true },
+			});
+			for (const [description, expected] of [
+				["message is not modified", true],
+				["message to edit not found", false],
+			] as const) {
+				send.mockResolvedValueOnce(Response.json({ ok: false, error_code: 400, description }));
+				expect(await adapter.editRich("42", handle, "literal", keyboard)).toBe(expected);
+			}
+			send.mockRejectedValueOnce(new TypeError("network unavailable"));
+			await expect(adapter.editRich("42", handle, "literal", keyboard)).rejects.toThrow("network unavailable");
+			expect(send.mock.calls.slice(1).map(([method]) => String(method).split("/").at(-1))).toEqual(
+				Array(3).fill("editMessageText"),
+			);
+			send.mockResolvedValueOnce(Response.json({ ok: true, result: { message_id: 71 } }));
+			await adapter.editRich("42", handle, "Panel closed", []);
+			expect(JSON.parse(String(send.mock.calls.at(-1)?.[1]?.body))).toEqual({
+				chat_id: "42",
+				message_id: 71,
+				text: "Panel closed",
+				reply_markup: { inline_keyboard: [] },
+			});
+		} finally {
+			vi.unstubAllGlobals();
+		}
 	});
 
 	it("maps buttons onto QQ command buttons, capped at 5x5", () => {
 		const rows = qqKeyboard(keyboard)?.content.rows ?? [];
 		expect(rows.length).toBeLessThanOrEqual(5);
 		for (const row of rows) expect(row.buttons.length).toBeLessThanOrEqual(5);
-		expect(rows[0].buttons[0].action.data).toBe("/memory approve all");
+		expect(rows.flatMap((row) => row.buttons).map((button) => button.action.data)).toContain(
+			`/settings act mem:ok:${snapshot.pendingKey}`,
+		);
 	});
 });
 
 describe("models.json", () => {
 	it("writes a provider, keeps a backup and reads it back", () => {
 		const dir = mkdtempSync(join(tmpdir(), "nekopal-models-"));
-		writeFileSync(modelsJsonPath(dir), JSON.stringify({ providers: {} }));
+		writeFileSync(modelsJsonPath(dir), JSON.stringify({ unknown: { keep: 1 }, exists: "user field" }));
 		upsertProvider(dir, {
 			name: "myapi",
 			baseUrl: "https://api.example.com/v1",
@@ -185,6 +260,7 @@ describe("models.json", () => {
 		const written = JSON.parse(readFileSync(modelsJsonPath(dir), "utf-8")) as {
 			providers: { myapi: { apiKey: string; models: { id: string }[] } };
 		};
+		expect(written).toMatchObject({ unknown: { keep: 1 }, exists: "user field" });
 		expect(written.providers.myapi.apiKey).toBe("$MYAPI_KEY");
 		expect(written.providers.myapi.models[0].id).toBe("m1");
 		expect(() => readFileSync(`${modelsJsonPath(dir)}.bak`)).not.toThrow();
@@ -202,6 +278,45 @@ describe("models.json", () => {
 		expect(removeProvider(dir, "gone")).toBe(true);
 		expect(removeProvider(dir, "gone")).toBe(false);
 		expect(listCustomProviders(dir)).toEqual([]);
+	});
+
+	it.each(["{broken", "[]", "null", '{"providers":[]}', '{"providers":1}'])(
+		"preserves invalid config and backup: %s",
+		(invalid) => {
+			const dir = mkdtempSync(join(tmpdir(), "nekopal-models-"));
+			const path = modelsJsonPath(dir);
+			writeFileSync(path, invalid);
+			writeFileSync(`${path}.bak`, "previous");
+			expect(() => removeProvider(dir, "old")).toThrow();
+			expect(() =>
+				upsertProvider(dir, {
+					name: "new",
+					baseUrl: "https://example.org",
+					api: "openai-responses",
+					apiKey: "fake",
+					models: [],
+				}),
+			).toThrow();
+			expect(readFileSync(path, "utf8")).toBe(invalid);
+			expect(readFileSync(`${path}.bak`, "utf8")).toBe("previous");
+		},
+	);
+
+	it("refuses to replace an ID introduced while a wizard was probing", () => {
+		const dir = mkdtempSync(join(tmpdir(), "nekopal-models-"));
+		const path = modelsJsonPath(dir);
+		const original = '{ "providers": {"myapi": {"name":"existing"}} }';
+		writeFileSync(path, original);
+		expect(() =>
+			upsertProvider(dir, {
+				name: "myapi",
+				baseUrl: "https://example.org",
+				api: "openai-responses",
+				apiKey: "fake",
+				models: [],
+			}),
+		).toThrow();
+		expect(readFileSync(path, "utf8")).toBe(original);
 	});
 
 	it("treats a built-in id as taken", () => {

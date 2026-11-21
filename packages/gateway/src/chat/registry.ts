@@ -1,5 +1,5 @@
 import type { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
-import type { Adapter, ChannelName, Inbound, Lang } from "../channel/types.ts";
+import type { Adapter, ChannelName, Inbound, Lang, ReplyFormat } from "../channel/types.ts";
 import type { JobStore } from "../cron/store.ts";
 import type { NekoPalExtensionOptions } from "../extension/nekopal-extension.ts";
 import { languageFromCode } from "../i18n/index.ts";
@@ -25,6 +25,7 @@ export interface ChatRegistryOptions {
 export class ChatRegistry {
 	private readonly options: ChatRegistryOptions;
 	private readonly chats = new Map<string, ChatContext>();
+	private readonly opening = new Map<string, Promise<ChatContext>>();
 	private readonly adapters = new Map<string, Adapter>();
 
 	constructor(options: ChatRegistryOptions) {
@@ -62,16 +63,19 @@ export class ChatRegistry {
 		const key = `${message.channel}-${message.chatId}`;
 		const existing = this.chats.get(key);
 		if (existing) return existing;
+		const pending = this.opening.get(key);
+		if (pending) return pending;
 
 		const adapter = this.adapters.get(message.channel);
 		if (!adapter) throw new Error(`No adapter for ${message.channel}`);
 		const lang =
 			this.options.state.chats[key]?.lang ?? languageFromCode(message.languageCode) ?? this.options.defaultLang;
-		const context = new ChatContext({
+		const context: ChatContext = new ChatContext({
 			adapter,
 			chatId: message.chatId,
 			userId: message.userId,
 			lang,
+			telegramReplyFormat: this.options.state.chats[key]?.telegramReplyFormat,
 			workspace: this.options.workspace,
 			agentDir: this.options.agentDir,
 			settingsManager: this.options.settingsManager,
@@ -80,15 +84,19 @@ export class ChatRegistry {
 			pending: this.options.pending,
 			jobs: this.options.jobs,
 			redactor: this.options.redactor,
-			onPromptNotice: (text) => {
-				void context.sendPlain(text);
-			},
+			onPromptNotice: (text) => context.sendMenuNotice(text, context.pendingPrompt),
 		});
 		context.setReviewEveryTurns(this.options.settingsManager.getNekoPal().memory?.reviewEveryTurns ?? 0);
-		this.chats.set(key, context);
-		await context.start();
-		log("info", `opened chat ${key}`);
-		return context;
+		const ready = context
+			.start()
+			.then(() => {
+				this.chats.set(key, context);
+				log("info", `opened chat ${key}`);
+				return context;
+			})
+			.finally(() => this.opening.delete(key));
+		this.opening.set(key, ready);
+		return ready;
 	}
 
 	/** Set a chat's language and persist it. */
@@ -100,7 +108,16 @@ export class ChatRegistry {
 		if (chat) chat.lang = lang;
 	}
 
+	setReplyFormat(chat: ChatContext, format: ReplyFormat): void {
+		const key = `${chat.adapter.name}-${chat.chatId}`;
+		this.options.state.mutate((state) => {
+			state.chats[key] = { ...state.chats[key], telegramReplyFormat: format };
+		});
+		chat.telegramReplyFormat = format;
+	}
+
 	async dispose(): Promise<void> {
+		await Promise.allSettled(this.opening.values());
 		for (const chat of this.chats.values()) {
 			try {
 				await chat.dispose();

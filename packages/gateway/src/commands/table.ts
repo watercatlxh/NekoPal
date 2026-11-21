@@ -4,7 +4,8 @@ import type { ChatContext } from "../chat/context.ts";
 import { nextRun } from "../cron/schedule.ts";
 import { t } from "../i18n/index.ts";
 import { logError } from "../log.ts";
-import { navButton, type PanelButton, type PanelPage, runButton, toKeyboard } from "../panel/encode.ts";
+import { type PanelButton, type PanelPage, panelKey, runButton, toKeyboard } from "../panel/encode.ts";
+import { pageFooter, pageSlice, preview } from "../panel/model.ts";
 import { removeProvider } from "../panel/models-json.ts";
 import { view as viewOf } from "../panel/router.ts";
 import type { CommandContext, CommandTable } from "./index.ts";
@@ -136,7 +137,8 @@ export function createCommands(): CommandTable {
 			const chat = chatOf(context);
 			const lang = chat.lang;
 			if (!args) {
-				const models = chat.session.modelRuntime.getModels();
+				const notice = await googleRosterNotice(context);
+				const models = chat.session.modelRuntime.getAvailableSnapshot();
 				const groups = new Map<string, string[]>();
 				for (const model of models) {
 					const list = groups.get(model.provider) ?? [];
@@ -147,6 +149,7 @@ export function createCommands(): CommandTable {
 					t(lang, "model.current", { model: modelLabel(chat.session), thinking: chat.session.thinkingLevel }),
 				];
 				for (const [provider, ids] of groups) lines.push(`${provider}: ${ids.join(", ")}`);
+				if (notice) lines.push(notice);
 				await chat.sendPlain(lines.join("\n"));
 				return;
 			}
@@ -308,28 +311,47 @@ export function createCommands(): CommandTable {
 	return commands;
 }
 
-/**
- * Show a panel page: buttons where the channel has them, the same text where it does not.
- *
- * `handle` rewrites an existing message in place, which is what a button press does; without it the
- * page opens as a new message.
- */
+/** Present exactly one panel, editing only a known bot message. Returns its handle. */
+export async function presentPanel(
+	chat: ChatContext,
+	text: string,
+	rows: ReadonlyArray<ReadonlyArray<PanelButton>>,
+	handle?: SentHandle,
+	replyTo = chat.replyTo,
+): Promise<SentHandle> {
+	const keyboard = toKeyboard(rows);
+	const displayed = text.length > 4096 ? `${text.slice(0, 4095).replace(/[\uD800-\uDBFF]$/, "")}…` : text;
+	if (handle && chat.adapter.caps.edit && (await chat.editRich(handle, displayed, keyboard))) return handle;
+	return chat.sendRich(displayed, replyTo, keyboard);
+}
+
 export async function showPanel(
 	context: CommandContext,
 	page: PanelPage,
-	handle?: SentHandle,
 	arg = "",
+	modelProvider?: string,
 ): Promise<void> {
-	const chat = context.chat;
-	const view = viewOf(context, page, arg);
-	if (!chat.adapter.caps.edit) {
-		// No buttons and no way to rewrite the message: the text alone is still useful.
-		await chat.sendPlain(view.text);
-		return;
+	const rosterNotice = page === "mdl" ? await googleRosterNotice(context) : "";
+	const view = viewOf(context, page, arg, modelProvider);
+	await presentPanel(
+		context.chat,
+		[view.text, rosterNotice].filter(Boolean).join("\n"),
+		view.rows,
+		context.panelOrigin?.handle,
+		context.message.messageId,
+	);
+}
+
+async function googleRosterNotice(context: CommandContext): Promise<string> {
+	const { modelRuntime, chat } = context;
+	if (!modelRuntime.isUsingOAuth("google")) return "";
+	try {
+		const result = await modelRuntime.refresh({ providers: ["google"], signal: AbortSignal.timeout(10_000) });
+		if (result.aborted || result.errors.has("google")) return t(chat.lang, "model.rosterFailed");
+		return modelRuntime.getModels("google").length ? "" : t(chat.lang, "model.rosterEmpty");
+	} catch {
+		return t(chat.lang, "model.rosterFailed");
 	}
-	const keyboard = toKeyboard(view.rows);
-	if (handle !== undefined && (await chat.editRich(handle, view.text, keyboard))) return;
-	await chat.sendRich(view.text, undefined, keyboard);
 }
 
 /** A page name as `/settings <page>` spells it, or undefined when it is not one. */
@@ -341,14 +363,10 @@ export function isPage(name: string): name is PanelPage {
 		name === "ses" ||
 		name === "pkg" ||
 		name === "mem" ||
-		name === "job"
+		name === "job" ||
+		name === "sys"
 	);
 }
-
-/** Sessions per page of the `/resume` panel. */
-const SESSIONS_PER_PAGE = 5;
-/** Page buttons shown at once, so the row stays tappable. */
-const MAX_PAGE_BUTTONS = 5;
 
 /**
  * Show the sessions of this chat as pages of buttons.
@@ -359,41 +377,17 @@ const MAX_PAGE_BUTTONS = 5;
 export async function showResume(context: CommandContext, page: number): Promise<void> {
 	const chat = context.chat;
 	const sessions = await chat.listSessions();
-	if (sessions.length === 0) {
-		await chat.sendPlain(t(chat.lang, "session.listEmpty"));
-		return;
-	}
-	const pages = Math.ceil(sessions.length / SESSIONS_PER_PAGE);
-	const current = Math.min(Math.max(page, 0), pages - 1);
-	const slice = sessions.slice(current * SESSIONS_PER_PAGE, (current + 1) * SESSIONS_PER_PAGE);
+	const { items, current, pages, start } = pageSlice(sessions, page, 3);
 	const lines = [t(chat.lang, "session.pages", { total: sessions.length, page: current + 1, pages })];
-	const rows: PanelButton[][] = [];
-	for (const [offset, session] of slice.entries()) {
-		const number = current * SESSIONS_PER_PAGE + offset + 1;
-		const first = session.firstMessage.replace(/\s+/g, " ").slice(0, 28);
-		rows.push([runButton(`${number}. ${first}`, "ses", "resume", String(number), `/resume ${number}`)]);
-	}
-	if (pages > 1) {
-		const pageRow: PanelButton[] = [];
-		if (current > 0) pageRow.push(runButton("⬅️", "ses", "page", String(current - 1), `/resume page ${current - 1}`));
-		const from = Math.max(0, Math.min(current - Math.floor(MAX_PAGE_BUTTONS / 2), pages - MAX_PAGE_BUTTONS));
-		for (let index = from; index < Math.min(pages, from + MAX_PAGE_BUTTONS); index += 1) {
-			pageRow.push(
-				runButton(
-					index === current ? `·${index + 1}·` : String(index + 1),
-					"ses",
-					"page",
-					String(index),
-					`/resume page ${index}`,
-				),
-			);
-		}
-		if (current < pages - 1)
-			pageRow.push(runButton("➡️", "ses", "page", String(current + 1), `/resume page ${current + 1}`));
-		rows.push(pageRow);
-	}
-	rows.push([navButton(t(chat.lang, "panel.back"), "set")]);
-	await chat.sendRich(lines.join("\n"), undefined, toKeyboard(rows));
+	if (!items.length) lines.push(t(chat.lang, "session.listEmpty"));
+	const rows: PanelButton[][] = items.map((session, offset) => {
+		const number = start + offset + 1;
+		const first = preview(session.firstMessage, 80) || session.id.slice(0, 8);
+		lines.push(`${number}. ${first} · ${session.id.slice(0, 8)}`);
+		return [runButton(`${number}. ${preview(first, 40)}`, "ses", "resume", panelKey([session.id]))];
+	});
+	rows.push(pageFooter(chat.lang, "ses", current, pages, (n) => `pg:ses:${n}`));
+	await presentPanel(chat, lines.join("\n"), rows, context.panelOrigin?.handle, context.message.messageId);
 }
 
 /**
@@ -405,6 +399,20 @@ export async function showResume(context: CommandContext, page: number): Promise
 async function runSettings(context: CommandContext, args: string): Promise<void> {
 	const chat = context.chat;
 	const [head = "", ...rest] = args.split(/\s+/).filter(Boolean);
+	if (head === "format") {
+		if (chat.adapter.name !== "telegram") {
+			await chat.say("panel.telegramOnly");
+			return;
+		}
+		const [format] = rest;
+		if (rest.length !== 1 || (format !== "rich" && format !== "mdv2")) {
+			await chat.sendPlain("Usage: /settings format <rich|mdv2>");
+			return;
+		}
+		context.registry.setReplyFormat(chat, format);
+		if (!context.panelOrigin) await showPanel(context, "sys");
+		return;
+	}
 	if (head === "page") {
 		await showResume(context, Number(rest[0] ?? "0"));
 		return;
@@ -420,7 +428,7 @@ async function runSettings(context: CommandContext, args: string): Promise<void>
 			return;
 		}
 		context.setLang(next);
-		await showPanel(context, "set");
+		if (!context.panelOrigin) await showPanel(context, "sys");
 		return;
 	}
 	if (head === "pvd" && rest[0] === "rm") {
@@ -429,12 +437,11 @@ async function runSettings(context: CommandContext, args: string): Promise<void>
 			await chat.sendPlain(`没有自定义提供商 ${id}`);
 			return;
 		}
-		await context.modelRuntime.refresh();
-		await chat.say("wizard.removed", { id });
-		await showPanel(context, "pvd");
+		await refreshAfterWrite(context, "wizard.removed", { id });
+		if (!context.panelOrigin) await showPanel(context, "pvd");
 		return;
 	}
-	await showPanel(context, isPage(head) ? head : "set", undefined, rest.join(" "));
+	if (!context.panelOrigin) await showPanel(context, isPage(head) ? head : "set", rest.join(" "));
 }
 
 /**
@@ -445,21 +452,44 @@ async function runSettings(context: CommandContext, args: string): Promise<void>
 async function runPackages(context: CommandContext, args: string): Promise<void> {
 	const [head, ref = ""] = args.split(/\s+/).filter(Boolean);
 	if (head === "rm") {
-		const manager = new DefaultPackageManager({
-			cwd: context.chat.workspace,
-			agentDir: context.agentDir,
-			settingsManager: context.settingsManager,
-		});
-		const target = manager.listConfiguredPackages()[Number(ref)];
+		const target = /^\d+$/.test(ref) ? packageManager(context).listConfiguredPackages()[Number(ref)] : undefined;
 		if (!target) {
-			await context.chat.sendPlain(`没有第 ${ref} 个扩展包`);
+			await context.chat.sendPlain("Usage: /packages rm <number>");
 			return;
 		}
-		await manager.removeAndPersist(target.source);
-		for (const other of context.registry.all()) await other.session.reload();
-		await context.chat.say("pkg.removed", { source: target.source });
-		await showPanel(context, "pkg");
+		await removePackage(context, target.source);
+		if (!context.panelOrigin) await showPanel(context, "pkg");
 		return;
 	}
-	await showPanel(context, "pkg");
+	if (!context.panelOrigin) await showPanel(context, "pkg");
+}
+
+export function packageManager(context: CommandContext): DefaultPackageManager {
+	return new DefaultPackageManager({
+		cwd: context.chat.workspace,
+		agentDir: context.agentDir,
+		settingsManager: context.settingsManager,
+	});
+}
+
+export async function removePackage(context: CommandContext, source: string): Promise<void> {
+	await packageManager(context).removeAndPersist(source);
+	for (const other of context.registry.all()) await other.session.reload();
+	await context.chat.say("pkg.removed", { source });
+}
+
+/** The write has already committed; never retry it or claim a failed reload succeeded. */
+export async function refreshAfterWrite(
+	context: CommandContext,
+	success: "wizard.saved" | "wizard.removed",
+	args: Record<string, string | number>,
+): Promise<void> {
+	let loaded = false;
+	try {
+		const { errors, aborted } = await context.modelRuntime.refresh();
+		loaded = !aborted && errors.size === 0 && !context.modelRuntime.getError();
+	} catch {
+		// Configuration errors can include credentials; report only the outcome.
+	}
+	await context.chat.say(loaded ? success : "wizard.loadFailed", args);
 }

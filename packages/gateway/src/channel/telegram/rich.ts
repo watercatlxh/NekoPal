@@ -27,21 +27,6 @@ export function toRich(markdown: string): string {
 	return defuseDetails(markdown);
 }
 
-/** A fence long enough that backticks inside `body` cannot close it early. */
-export function fence(info: string, body: string): string {
-	let longest = 0;
-	for (const run of body.matchAll(/`+/g)) longest = Math.max(longest, run[0].length);
-	const marker = "`".repeat(Math.max(3, longest + 1));
-	return `${marker}${info}\n${body}\n${marker}`;
-}
-
-/** A fold whose summary stays visible and whose body is hidden until tapped. */
-export function details(summary: string, body: string): string {
-	const head = defuseDetails(summary).replace(/\s+/g, " ").trim();
-	if (body.trim() === "") return `<details><summary>${head}</summary>\n\n</details>`;
-	return `<details><summary>${head}</summary>\n\n${defuseDetails(body).trim()}\n\n</details>`;
-}
-
 /** Telegram's `InlineKeyboardMarkup`, or undefined when there is nothing to show. */
 export function keyboardToMarkup(
 	keyboard: Keyboard | undefined,

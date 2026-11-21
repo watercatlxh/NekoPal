@@ -30,7 +30,7 @@ const PRIMARY_ARGUMENT: Record<string, readonly string[]> = {
 
 /** Default cap for one summary line. */
 const DEFAULT_LIMIT = 60;
-/** Cap for the body of a folded tool message: a chat message is a preview, not a log. */
+/** Raw text budget before a channel applies its own escaping. */
 const BODY_LIMIT = 1_500;
 
 /** The first non-empty string among `keys` of `args`, or "" when none is usable. */
@@ -56,7 +56,7 @@ function firstString(args: Record<string, unknown>): string {
 export function summarizeArgs(toolName: string, args: unknown, limit = DEFAULT_LIMIT): string {
 	if (typeof args !== "object" || args === null || Array.isArray(args)) return "";
 	const record = args as Record<string, unknown>;
-	const keys = PRIMARY_ARGUMENT[toolName];
+	const keys = Object.hasOwn(PRIMARY_ARGUMENT, toolName) ? PRIMARY_ARGUMENT[toolName] : undefined;
 	const raw = keys === undefined ? firstString(record) : pick(record, keys);
 	const text = raw.replace(/\s+/g, " ").trim();
 	if (text.length <= limit) return text;
@@ -84,22 +84,25 @@ export function resultText(result: unknown): string {
 }
 
 /**
- * The body of a folded tool message: the arguments, then the result.
+ * The raw details for a tool card: an optional failure line, then the arguments and result.
  *
  * Trimmed to `BODY_LIMIT` characters with a marker, because a chat message is a preview: the full
  * output is in the session transcript and in whatever file the tool wrote.
  */
-export function toolBody(args: unknown, result: string, limit = BODY_LIMIT): string {
+export function toolBody(args: unknown, result: string, failure?: string): string {
 	const blocks: string[] = [];
 	const arguments_ = typeof args === "object" && args !== null ? formatArgs(args as Record<string, unknown>) : "";
 	if (arguments_ !== "") blocks.push(arguments_);
 	if (result.trim() !== "") blocks.push(result.trim());
-	const body = blocks.join("\n\n");
-	if (body.length <= limit) return body;
-	return `${body.slice(0, Math.max(0, limit - 1))}…`;
+	let body = blocks.join("\n\n");
+	if (failure) body = body ? `${failure}\n${body}` : failure;
+	if (body.length <= BODY_LIMIT) return body || "…";
+	let cut = BODY_LIMIT - 1;
+	if (/[\uD800-\uDBFF]/.test(body.charAt(cut - 1))) cut--;
+	return `${body.slice(0, cut)}…`;
 }
 
-/** The arguments as one line per key, skipping the ones the summary already showed. */
+/** Keep argument keys and multi-line values as plain text; the adapter owns wire encoding. */
 function formatArgs(args: Record<string, unknown>): string {
 	const lines: string[] = [];
 	for (const [key, value] of Object.entries(args)) {

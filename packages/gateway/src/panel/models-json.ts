@@ -6,7 +6,8 @@
  * half-written file can never replace a working one.
  */
 
-import { copyFileSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { chmodSync, copyFileSync, lstatSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 /** The API shapes a custom provider can speak. */
@@ -41,6 +42,7 @@ export interface CustomProvider {
 
 /** What `models.json` holds, as far as this module cares. */
 interface ModelsFile {
+	[key: string]: unknown;
 	providers: Record<string, unknown>;
 }
 
@@ -53,28 +55,34 @@ export function modelsJsonPath(agentDir: string): string {
 	return join(agentDir, "models.json");
 }
 
-/** The file as an object; an empty skeleton when it does not exist or is unreadable. */
-function readFile(path: string): ModelsFile {
-	if (!existsSync(path)) return { providers: {} };
+/** Only a missing file is an empty catalog; refuse to replace any unreadable existing data. */
+function readFile(path: string): { file: ModelsFile; exists: boolean } {
+	try {
+		lstatSync(path);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT")
+			return { file: { providers: Object.create(null) }, exists: false };
+		throw new Error("Could not read models.json");
+	}
 	try {
 		const parsed: unknown = JSON.parse(readFileSync(path, "utf-8"));
-		if (typeof parsed !== "object" || parsed === null) return { providers: {} };
-		const providers = (parsed as { providers?: unknown }).providers;
-		if (typeof providers !== "object" || providers === null) return { providers: {} };
-		return { providers: providers as Record<string, unknown> };
+		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error();
+		const providers: unknown = "providers" in parsed && Object.hasOwn(parsed, "providers") ? parsed.providers : {};
+		if (typeof providers !== "object" || providers === null || Array.isArray(providers)) throw new Error();
+		return { file: { ...parsed, providers: Object.assign(Object.create(null), providers) }, exists: true };
 	} catch {
-		return { providers: {} };
+		throw new Error("Could not read models.json");
 	}
 }
 
 /** The providers already declared, by id. */
 export function listCustomProviders(agentDir: string): string[] {
-	return Object.keys(readFile(modelsJsonPath(agentDir)).providers);
+	return Object.keys(readFile(modelsJsonPath(agentDir)).file.providers);
 }
 
 /** Whether a provider id is already taken, by the file or by the built-in catalog. */
 export function providerTaken(agentDir: string, id: string, builtins: readonly string[]): boolean {
-	return builtins.includes(id) || id in readFile(modelsJsonPath(agentDir)).providers;
+	return builtins.includes(id) || Object.hasOwn(readFile(modelsJsonPath(agentDir)).file.providers, id);
 }
 
 /** The entry `models.json` gets for a provider. */
@@ -100,34 +108,44 @@ function entry(provider: CustomProvider): Record<string, unknown> {
 	};
 }
 
-/**
- * Add or replace a provider, atomically.
- *
- * The old file is copied to `models.json.bak` first and the new one is written beside it and
- * renamed into place, so a crash mid-write leaves the previous file intact.
- */
-export function upsertProvider(agentDir: string, provider: CustomProvider): void {
+/** Add a provider without replacing any existing id, using one synchronous read-modify-write. */
+export function upsertProvider(agentDir: string, provider: CustomProvider, reserved: readonly string[] = []): void {
 	const path = modelsJsonPath(agentDir);
-	const file = readFile(path);
+	const { file, exists } = readFile(path);
+	if (reserved.includes(provider.name) || Object.hasOwn(file.providers, provider.name))
+		throw new Error("Provider exists");
 	file.providers[provider.name] = entry(provider);
-	writeAtomic(path, file);
+	writeAtomic(path, file, exists);
 }
 
 /** Remove a provider; false when it was not declared. */
 export function removeProvider(agentDir: string, id: string): boolean {
 	const path = modelsJsonPath(agentDir);
-	const file = readFile(path);
-	if (!(id in file.providers)) return false;
+	const { file, exists } = readFile(path);
+	if (!Object.hasOwn(file.providers, id)) return false;
 	delete file.providers[id];
-	writeAtomic(path, file);
+	writeAtomic(path, file, exists);
 	return true;
 }
 
-function writeAtomic(path: string, file: ModelsFile): void {
-	if (existsSync(path)) copyFileSync(path, `${path}.bak`);
-	const temp = `${path}.tmp`;
-	writeFileSync(temp, `${JSON.stringify({ providers: file.providers }, null, "\t")}\n`, { mode: 0o600 });
-	renameSync(temp, path);
+function writeAtomic(path: string, file: ModelsFile, exists: boolean): void {
+	const temp = `${path}.${randomUUID()}.tmp`;
+	try {
+		writeFileSync(temp, `${JSON.stringify(file, null, "\t")}\n`, { mode: 0o600, flag: "wx" });
+		if (exists) {
+			const backup = `${temp}.bak`;
+			try {
+				copyFileSync(path, backup);
+				chmodSync(backup, 0o600);
+				renameSync(backup, `${path}.bak`);
+			} finally {
+				rmSync(backup, { force: true });
+			}
+		}
+		renameSync(temp, path);
+	} finally {
+		rmSync(temp, { force: true });
+	}
 }
 
 /** A discovered model id as a `models.json` model, with conservative defaults. */

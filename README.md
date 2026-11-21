@@ -12,8 +12,10 @@ the CLI, the telemetry and the 39 extra providers are gone, and everything is co
 
 - **Chat only.** No terminal UI, no subcommands: the daemon reads `~/.nekopal/settings.toml`, starts
   the channels that are enabled, and answers messages.
-- **OAuth-only providers.** `anthropic`, `openai`, `openai-codex`, `xai`. Sign in with `/login` in
-  the chat; credentials land in `~/.nekopal/auth.json` (mode 0600).
+- **Provider management.** Open `/settings` → Model → Providers to sign in with OAuth or configure
+  a custom API under its own provider ID. Prefer `$ENV` references to posting literal keys in chat.
+  For Google Antigravity, the picker loads the signed-in account's roster from Cloud Code Assist.
+  The bundled catalog supplies metadata, not evidence that an account can use a model.
 - **Bounded memory.** `MEMORY.md` (environment facts) and `USER.md` (who you are) are injected into
   the system prompt within a character budget. A background review proposes new entries every few
   turns; you approve them with `/memory approve`.
@@ -68,7 +70,7 @@ Secrets are references, not values: `$NAME` reads an environment variable and `!
 The daemon resolves them at startup and refuses to start a channel whose secret resolves to empty.
 A systemd deployment keeps them in `~/.nekopal/env` (see `deploy/nekopal.service`).
 
-Then talk to the bot: `/login anthropic`, and start asking. Nothing else needs a terminal.
+Then open `/settings` in chat and select a configured model.
 
 ## Commands
 
@@ -76,16 +78,16 @@ Then talk to the bot: `/login anthropic`, and start asking. Nothing else needs a
 |---|---|
 | `/help` | List the commands |
 | `/status` | Uptime, session, context usage, active chats |
-| `/settings` | The current configuration, memory usage, job count, channel list |
+| `/settings` | Open Sessions, Model, Memory, Jobs, or System status |
 | `/new`, `/sessions`, `/resume <n\|id>` | Start a fresh session, list recent ones, switch to one |
 | `/stop` | Abort the running reply |
 | `/model [provider/id]` | Show or switch the model (persisted) |
 | `/memory [list\|approve\|reject\|forget]` | Review and edit saved memories |
 | `/jobs [list\|add\|rm\|pause\|resume]` | Manage scheduled jobs |
-| `/lang <en\|zh>` | Switch the reply language |
-| `/login`, `/logout` | Provider credentials |
-| `/install`, `/remove`, `/packages` | pi extension packages |
-| `/cancel` | Cancel a pending question or login |
+| `/settings lang <en\|zh>` | Switch the chat language; also available in System status |
+| `/settings format rich\|mdv2` | Telegram only: choose the format for ordinary replies starting with the next run |
+| `/packages` | Open the package list and install or remove an extension |
+| `/cancel` | Cancel a pending question, custom API wizard, or login |
 
 The agent also has four tools of its own: `memory`, `cron`, `send` and `config_set`. `config_set`
 is the only way to change `settings.toml` — the file, its backup and `auth.json` are write-protected

@@ -6,12 +6,13 @@ import { t } from "../../i18n/index.ts";
 import type { LogErrorFn, LogFn } from "../../log.ts";
 import { splitMarkdown } from "../split.ts";
 import type { Adapter, Caps, ChannelAction, Inbound, Keyboard, Lang, SentHandle } from "../types.ts";
+import { ToolCallRejected } from "../types.ts";
 import { TelegramApi, type TelegramCallbackQuery, TelegramError, type TelegramMessage } from "./api.ts";
 import { toMarkdownV2 } from "./mdv2.ts";
 import { keyboardToMarkup, RICH_LIMIT, toRich } from "./rich.ts";
 import { stripMdv2 } from "./strip.ts";
 
-/** Source characters per message, leaving room for the escapes MarkdownV2 adds. */
+/** Source budget shared by Markdown sends and single-message previews. */
 const SOURCE_CHARS = 3500;
 /** Beyond this many chunks the reply is sent as one document instead. */
 const MAX_CHUNKS = 8;
@@ -43,9 +44,34 @@ export interface TelegramAdapterOptions {
 }
 
 const PARSE_ERROR = /can't parse entities|can't find end|unsupported start tag|(entit.*parse|parse.*entit)/i;
+const NOT_EDITABLE = /message to edit not found|message can(?:not|'t) be edited|message_id_invalid/i;
+const TOO_LONG = /(?:message|text) is too long|(?:message|text)_too_long/i;
 
 function isParseError(error: unknown): boolean {
-	return error instanceof TelegramError && PARSE_ERROR.test(error.description);
+	return error instanceof TelegramError && error.code === 400 && PARSE_ERROR.test(error.description);
+}
+
+function escapeHtml(text: string): string {
+	return text
+		.replaceAll("&", "&amp;")
+		.replaceAll("<", "&lt;")
+		.replaceAll(">", "&gt;")
+		.replaceAll('"', "&quot;")
+		.replaceAll("'", "&#39;");
+}
+
+function truncate(text: string, limit: number): string {
+	if (text.length <= limit) return text;
+	let end = limit - 1; // Reserve one code unit for the ellipsis.
+	const last = text.charCodeAt(end - 1);
+	if (last >= 0xd800 && last <= 0xdbff) end--;
+	return `${text.slice(0, end)}…`;
+}
+
+/** Telegram counts the visible UTF-16 text, not tags or entity spellings. */
+function toolFields(name: string, details: string): { name: string; details: string } {
+	const body = truncate(details || "…", 1500);
+	return { name: truncate(name, MESSAGE_LIMIT - "🔧 \n".length - body.length), details: body };
 }
 
 /** The Bot API adapter: long-polling updates, MarkdownV2 replies, photo and document uploads. */
@@ -230,20 +256,85 @@ class TelegramAdapter implements Adapter {
 		return handles;
 	}
 
+	private async deliverToolCall<T>(
+		name: string,
+		details: string,
+		post: (text: Record<string, string>) => Promise<T>,
+	): Promise<T> {
+		const fields = toolFields(name, details);
+		const html = `🔧 <b>${escapeHtml(fields.name)}</b>\n<blockquote expandable>${escapeHtml(fields.details)}</blockquote>`;
+		try {
+			return await this.withRetry(() => post({ text: html, parse_mode: "HTML" }));
+		} catch (error) {
+			if (!isParseError(error)) throw error;
+		}
+		return this.withRetry(() => post({ text: `🔧 ${fields.name}\n${fields.details}` }));
+	}
+
+	async sendToolCall(chatId: string, name: string, details: string, replyTo?: string): Promise<SentHandle> {
+		try {
+			const sent = await this.deliverToolCall(name, details, (text) =>
+				this.api.sendMessage({
+					chat_id: chatId,
+					...text,
+					...(replyTo
+						? { reply_parameters: { message_id: Number(replyTo), allow_sending_without_reply: true } }
+						: {}),
+				}),
+			);
+			return { id: String(sent.message_id) };
+		} catch (error) {
+			if (error instanceof TelegramError && [400, 401, 403, 404].includes(error.code)) {
+				throw new ToolCallRejected(error.description, { cause: error });
+			}
+			throw error;
+		}
+	}
+
+	async editToolCall(chatId: string, handle: SentHandle, name: string, details: string): Promise<boolean> {
+		try {
+			await this.deliverToolCall(name, details, (text) =>
+				this.api.call("editMessageText", {
+					chat_id: chatId,
+					message_id: Number(handle.id),
+					...text,
+				}),
+			);
+			return true;
+		} catch (error) {
+			if (error instanceof TelegramError && error.code === 400) {
+				if (/message is not modified/i.test(error.description)) return true;
+				if (NOT_EDITABLE.test(error.description)) return false;
+			}
+			throw error;
+		}
+	}
+
 	/**
 	 * Send one message as rich Markdown, so lists, tables and `<details>` render as Telegram's own
 	 * constructs. Falls back to MarkdownV2, then to stripped text, when Telegram rejects the payload.
 	 */
 	async sendRich(chatId: string, markdown: string, replyTo?: string, keyboard?: Keyboard): Promise<SentHandle> {
+		if (keyboard !== undefined) {
+			const sent = await this.withRetry(() =>
+				this.api.sendMessage({
+					chat_id: chatId,
+					text: markdown,
+					reply_markup: keyboardToMarkup(keyboard) ?? { inline_keyboard: [] },
+					...(replyTo
+						? { reply_parameters: { message_id: Number(replyTo), allow_sending_without_reply: true } }
+						: {}),
+				}),
+			);
+			return { id: String(sent.message_id) };
+		}
 		const body: Record<string, unknown> = { chat_id: chatId, rich_message: { markdown: toRich(markdown) } };
 		if (replyTo) body.reply_parameters = { message_id: Number(replyTo) };
-		const markup = keyboardToMarkup(keyboard);
-		if (markup) body.reply_markup = markup;
 		try {
 			const sent = await this.withRetry(() => this.api.call<TelegramMessage>("sendRichMessage", body));
 			return { id: String(sent.message_id) };
 		} catch (error) {
-			if (error instanceof TelegramError && error.code === 429) throw error;
+			if (!(error instanceof TelegramError) || error.code !== 400) throw error;
 			this.options.logError("telegram: rich send rejected, falling back", error);
 		}
 		const [handle] = await this.sendMarkdown(chatId, markdown, replyTo);
@@ -252,6 +343,25 @@ class TelegramAdapter implements Adapter {
 
 	/** Replace a message with rich Markdown. False when it does not fit one message. */
 	async editRich(chatId: string, handle: SentHandle, markdown: string, keyboard?: Keyboard): Promise<boolean> {
+		if (keyboard !== undefined) {
+			try {
+				await this.withRetry(() =>
+					this.api.call("editMessageText", {
+						chat_id: chatId,
+						message_id: Number(handle.id),
+						text: markdown,
+						reply_markup: keyboardToMarkup(keyboard) ?? { inline_keyboard: [] },
+					}),
+				);
+				return true;
+			} catch (error) {
+				if (error instanceof TelegramError) {
+					if (/message is not modified/i.test(error.description)) return true;
+					if (error.code === 400 && NOT_EDITABLE.test(error.description)) return false;
+				}
+				throw error;
+			}
+		}
 		const source = toRich(markdown);
 		if (source.length > RICH_LIMIT) return false;
 		const body: Record<string, unknown> = {
@@ -259,16 +369,14 @@ class TelegramAdapter implements Adapter {
 			message_id: Number(handle.id),
 			rich_message: { markdown: source },
 		};
-		const markup = keyboardToMarkup(keyboard);
-		if (markup) body.reply_markup = markup;
 		try {
 			await this.withRetry(() => this.api.call("editMessageText", body));
 			return true;
 		} catch (error) {
-			if (error instanceof TelegramError && /message is not modified/i.test(error.description)) return true;
-			if (!(error instanceof TelegramError) || error.code === 429) throw error;
-			// A message Telegram will not take as rich (an unsupported construct, a stale id) still
-			// renders through the MarkdownV2 path, which is what the fallback exists for.
+			if (!(error instanceof TelegramError) || error.code !== 400) throw error;
+			if (/message is not modified/i.test(error.description)) return true;
+			if (NOT_EDITABLE.test(error.description) || TOO_LONG.test(error.description)) return false;
+			// Retry unsupported constructs through the standard Markdown path.
 			this.options.logError("telegram: rich edit rejected, falling back", error);
 		}
 		return this.editMarkdown(chatId, handle, markdown);
@@ -299,17 +407,24 @@ class TelegramAdapter implements Adapter {
 	}
 
 	private async sendChunk(chatId: string, chunk: string, replyTo: string | undefined): Promise<TelegramMessage> {
-		const body: Record<string, unknown> = { chat_id: chatId, parse_mode: "MarkdownV2", text: toMarkdownV2(chunk) };
+		const rendered = toMarkdownV2(chunk);
+		const body: Record<string, unknown> = { chat_id: chatId, parse_mode: "MarkdownV2", text: rendered };
 		if (replyTo) body.reply_parameters = { message_id: Number(replyTo) };
 		try {
 			return await this.withRetry(() => this.api.sendMessage(body));
 		} catch (error) {
-			if (!isParseError(error)) throw error;
+			// Rendering (e.g. a table as bullets) can expand even a single source chunk.
+			if (
+				!isParseError(error) &&
+				!(error instanceof TelegramError && error.code === 400 && TOO_LONG.test(error.description))
+			) {
+				throw error;
+			}
 		}
 
 		// The renderer produced something Telegram rejects: send the stripped text without a parse mode.
-		const plain = stripMdv2(toMarkdownV2(chunk));
-		const fallback = plain.length > MESSAGE_LIMIT ? stripMdv2(chunk).slice(0, MESSAGE_LIMIT) : plain;
+		const plain = stripMdv2(rendered);
+		const fallback = plain.length > MESSAGE_LIMIT ? chunk : plain;
 		const body2: Record<string, unknown> = { chat_id: chatId, text: fallback };
 		if (replyTo) body2.reply_parameters = { message_id: Number(replyTo) };
 		return this.withRetry(() => this.api.sendMessage(body2));
@@ -339,11 +454,10 @@ class TelegramAdapter implements Adapter {
 		}
 	}
 
-	/** Replace a message through the MarkdownV2 path, used when a rich edit is rejected. */
-	private async editMarkdown(chatId: string, handle: SentHandle, markdown: string): Promise<boolean> {
+	/** Edit one message from original Markdown. Only a definite refusal permits a replacement send. */
+	async editMarkdown(chatId: string, handle: SentHandle, markdown: string): Promise<boolean> {
 		const rendered = toMarkdownV2(markdown);
-		// A rendered reply that no longer fits one message is sent normally instead.
-		if (rendered.length > MESSAGE_LIMIT) return false;
+		// Telegram applies the limit after parsing entities, not to the backslash-escaped payload.
 		try {
 			await this.withRetry(() =>
 				this.api.call("editMessageText", {
@@ -355,17 +469,26 @@ class TelegramAdapter implements Adapter {
 			);
 			return true;
 		} catch (error) {
-			if (error instanceof TelegramError && /message is not modified/i.test(error.description)) return true;
+			if (!(error instanceof TelegramError) || error.code !== 400) throw error;
+			if (/message is not modified/i.test(error.description)) return true;
+			if (NOT_EDITABLE.test(error.description) || TOO_LONG.test(error.description)) return false;
 			if (!isParseError(error)) throw error;
 		}
 		// The renderer produced something Telegram rejects: edit in the stripped text without a parse mode.
-		await this.withRetry(() =>
-			this.api.call("editMessageText", {
-				chat_id: chatId,
-				message_id: Number(handle.id),
-				text: stripMdv2(rendered),
-			}),
-		);
+		try {
+			await this.withRetry(() =>
+				this.api.call("editMessageText", {
+					chat_id: chatId,
+					message_id: Number(handle.id),
+					text: stripMdv2(rendered),
+				}),
+			);
+		} catch (error) {
+			if (!(error instanceof TelegramError) || error.code !== 400) throw error;
+			if (/message is not modified/i.test(error.description)) return true;
+			if (NOT_EDITABLE.test(error.description) || TOO_LONG.test(error.description)) return false;
+			throw error;
+		}
 		return true;
 	}
 

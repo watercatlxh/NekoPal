@@ -18,7 +18,7 @@ import {
 	noOpUIContext,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import type { Adapter, Keyboard, Lang, SentHandle } from "../channel/types.ts";
+import type { Adapter, Keyboard, Lang, ReplyFormat, SentHandle } from "../channel/types.ts";
 import type { JobStore } from "../cron/store.ts";
 import type { NekoPalExtensionOptions } from "../extension/nekopal-extension.ts";
 import { nekopalExtension } from "../extension/nekopal-extension.ts";
@@ -47,9 +47,12 @@ function textOf(content: UserMessage["content"] | AssistantMessage["content"]): 
 /** Prompt waiting for the user's next message, used by `/login` and extension dialogs. */
 export interface PendingPrompt {
 	question: string;
-	resolve(value: string): void;
-	reject(error: Error): void;
-	timer: NodeJS.Timeout;
+	finish(answer?: string): void;
+}
+
+interface MenuPrompt {
+	id: string;
+	keyboard: Keyboard;
 }
 
 export interface ChatContextOptions {
@@ -57,6 +60,7 @@ export interface ChatContextOptions {
 	chatId: string;
 	userId: string;
 	lang: Lang;
+	telegramReplyFormat?: ReplyFormat;
 	workspace: string;
 	agentDir: string;
 	settingsManager: SettingsManager;
@@ -65,7 +69,7 @@ export interface ChatContextOptions {
 	pending: PendingStore;
 	jobs: JobStore;
 	redactor: NekoPalExtensionOptions["redactor"];
-	onPromptNotice?(text: string): void;
+	onPromptNotice?(text: string): void | Promise<void>;
 }
 
 /**
@@ -81,6 +85,7 @@ export class ChatContext implements ChatController {
 	/** Inbound message this chat is answering, for platforms whose replies must reference it. */
 	replyTo: string | undefined;
 	lang: Lang;
+	telegramReplyFormat: ReplyFormat;
 	readonly workspace: string;
 	readonly agentDir: string;
 	readonly memory: MemoryStore;
@@ -91,7 +96,10 @@ export class ChatContext implements ChatController {
 	private readonly jobs: JobStore;
 	/** Extension load failures, reported to the chat before its first reply. */
 	private extensionErrors = 0;
-	private readonly onPromptNotice: ((text: string) => void) | undefined;
+	private readonly onPromptNotice: ChatContextOptions["onPromptNotice"];
+	private menuScope?: MenuPrompt;
+	/** Only messages posted as notices, never the panel that started the flow. */
+	private readonly menuNotices = new Map<SentHandle, PendingPrompt | undefined>();
 	private runtime!: AgentSessionRuntime;
 	private readonly reply: ReplyController;
 	private queue: Promise<void> = Promise.resolve();
@@ -108,6 +116,7 @@ export class ChatContext implements ChatController {
 		this.chatId = options.chatId;
 		this.userId = options.userId;
 		this.lang = options.lang;
+		this.telegramReplyFormat = options.telegramReplyFormat === "mdv2" ? "mdv2" : "rich";
 		this.workspace = options.workspace;
 		this.agentDir = options.agentDir;
 		this.memory = options.memory;
@@ -143,6 +152,15 @@ export class ChatContext implements ChatController {
 
 	get pendingPrompt(): PendingPrompt | undefined {
 		return this.pending;
+	}
+
+	get menuPrompt(): MenuPrompt | undefined {
+		return this.menuScope;
+	}
+
+	set menuPrompt(scope: MenuPrompt | undefined) {
+		if (this.menuScope?.id !== scope?.id) this.retireMenuNotices();
+		this.menuScope = scope;
 	}
 
 	/** Create the session and bind extensions; call once at startup. */
@@ -297,28 +315,32 @@ export class ChatContext implements ChatController {
 		};
 	}
 
-	/** Ask the user a question; resolves with their next message, or undefined after 10 minutes. */
-	ask(question: string): Promise<string | undefined> {
-		this.discardPending();
+	/** Ask for the next message. An aborted, replaced, cancelled or expired prompt yields undefined. */
+	ask(question: string, signal?: AbortSignal): Promise<string | undefined> {
+		if (signal?.aborted) return Promise.resolve(undefined);
+		this.pending?.finish();
 		const { promise, resolve } = Promise.withResolvers<string | undefined>();
-		const timer = setTimeout(() => {
+		const finish = (answer?: string): void => {
+			if (this.pending !== pending) return;
 			this.pending = undefined;
-			resolve(undefined);
-		}, 10 * 60_000);
-		timer.unref();
-		this.pending = {
-			question,
-			resolve: (value) => {
-				clearTimeout(timer);
-				resolve(value);
-			},
-			reject: () => {
-				clearTimeout(timer);
-				resolve(undefined);
-			},
-			timer,
+			clearTimeout(timer);
+			signal?.removeEventListener("abort", onAbort);
+			this.retireMenuNotices(pending);
+			resolve(answer);
 		};
-		this.onPromptNotice?.(question);
+		const pending: PendingPrompt = { question, finish };
+		const onAbort = () => finish();
+		const timer = setTimeout(onAbort, 10 * 60_000);
+		timer.unref();
+		this.pending = pending;
+		signal?.addEventListener("abort", onAbort, { once: true });
+		try {
+			// A failed or delayed delivery belongs to this question, not its successor.
+			this.onPromptNotice?.(question)?.catch(() => finish());
+		} catch (error) {
+			finish();
+			throw error;
+		}
 		return promise;
 	}
 
@@ -326,9 +348,7 @@ export class ChatContext implements ChatController {
 	answerPending(text: string): boolean {
 		const pending = this.pending;
 		if (!pending) return false;
-		this.pending = undefined;
-		clearTimeout(pending.timer);
-		pending.resolve(text);
+		pending.finish(text);
 		return true;
 	}
 
@@ -337,21 +357,9 @@ export class ChatContext implements ChatController {
 		this.loginAbort = abort;
 	}
 
-	/**
-	 * Drop a pending question without touching a login: `ask()` calls this to replace an older
-	 * question, and a login's own prompts must not abort the login that is asking them.
-	 */
-	private discardPending(): void {
-		const pending = this.pending;
-		if (!pending) return;
-		this.pending = undefined;
-		clearTimeout(pending.timer);
-		pending.reject(new Error("cancelled"));
-	}
-
 	/** Cancel a pending question; `/cancel` also aborts a login waiting for its answer. */
 	cancelPending(): void {
-		this.discardPending();
+		this.pending?.finish();
 		this.loginAbort?.();
 	}
 
@@ -398,6 +406,32 @@ export class ChatContext implements ChatController {
 
 	async sendPlain(text: string): Promise<void> {
 		await this.adapter.sendMarkdown(this.chatId, text, this.replyTo);
+	}
+
+	/** Attach Cancel to the actual question or authorization notice, not a second message. */
+	async sendMenuNotice(text: string, pending?: PendingPrompt): Promise<void> {
+		const scope = this.menuScope;
+		if (!scope) return this.sendPlain(text);
+		const handle = await this.sendRich(text, this.replyTo, scope.keyboard);
+		if (!this.adapter.caps.edit) return; // QQ buttons are invalidated by their flow ID.
+		if (this.menuScope?.id !== scope.id || (pending && pending !== this.pending)) {
+			this.clearNoticeKeyboard(handle);
+		} else {
+			this.menuNotices.set(handle, pending);
+		}
+	}
+
+	private retireMenuNotices(pending?: PendingPrompt): void {
+		for (const [handle, owner] of this.menuNotices) {
+			if (pending && owner !== pending) continue;
+			this.menuNotices.delete(handle);
+			this.clearNoticeKeyboard(handle);
+		}
+	}
+
+	private clearNoticeKeyboard(handle: SentHandle): void {
+		// A deleted notice needs no cleanup; never retry by sending or editing the parent panel.
+		void this.adapter.editMarkup(this.chatId, handle, []).catch(() => {});
 	}
 
 	async deleteMessage(handle: SentHandle): Promise<void> {

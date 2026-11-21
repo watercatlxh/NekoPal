@@ -110,11 +110,14 @@ describe("Daemon", () => {
 		const harness = await createHarness();
 		await harness.deliver("/settings");
 		const panel = await harness.adapter.next("NekoPal");
-		expect(panel).toContain("Language: en");
-		expect(panel).toContain("Memory:");
-		// The panel carries buttons: one per area, and the language pair.
-		const keyboard = harness.adapter.keyboards.find((entry) => entry !== undefined);
-		expect(keyboard?.flat().map((button) => button.data)).toContain("nav:mdl");
+		expect(panel.split("\n")).toHaveLength(3);
+		const system = harness.adapter.keyboards
+			.at(-1)
+			?.flat()
+			.find((button) => button.data === "nav:sys");
+		await harness.press(system!.data);
+		const status = await harness.adapter.next("Language: en");
+		expect(status).toContain("Memory:");
 	});
 
 	it("exposes the command list a platform menu needs", async () => {

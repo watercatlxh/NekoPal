@@ -1,6 +1,6 @@
 import type { AgentSession, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { findExactModelReferenceMatch, resolveModelReference } from "@earendil-works/pi-coding-agent";
-import type { Inbound, Lang } from "../channel/types.ts";
+import type { Inbound, Lang, SentHandle } from "../channel/types.ts";
 import type { ChatContext } from "../chat/context.ts";
 import type { ChatRegistry } from "../chat/registry.ts";
 import { parseSchedule } from "../cron/schedule.ts";
@@ -12,6 +12,8 @@ import type { MemoryOperation, MemoryStore, PendingStore } from "../memory/store
 export interface CommandContext {
 	chat: ChatContext;
 	message: Inbound;
+	/** Present the command result through the panel action, not a second panel. */
+	panelOrigin?: { handle?: SentHandle };
 	registry: ChatRegistry;
 	memory: MemoryStore;
 	pending: PendingStore;
@@ -88,16 +90,6 @@ export function modelLabel(session: AgentSession): string {
 /** Resolve `provider/id` (with optional thinking suffix) against the runtime's models. */
 export function resolveModel(session: AgentSession, text: string) {
 	const runtime = session.modelRuntime;
-	// A panel button sends `mdl:<provider>:<index>`: the model id it listed at that index,
-	// so a Telegram callback never has to carry a long model id.
-	const panel = /^mdl:([a-z0-9_-]+):(\d+)$/i.exec(text.trim());
-	if (panel) {
-		const listed = runtime
-			.getModels()
-			.filter((candidate) => candidate.provider === panel[1] && runtime.hasConfiguredAuth(candidate.provider));
-		const found = listed[Number(panel[2])];
-		if (found) return found;
-	}
 	const result = resolveModelReference(
 		{ text, thinkingSuffix: "lenient", fuzzy: true },
 		runtime.getModels(),

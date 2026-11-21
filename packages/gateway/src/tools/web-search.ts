@@ -32,7 +32,7 @@ interface EngineResult {
 const USER_AGENT =
 	"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
-/** Per-engine timeout. The whole call is bounded by the fan-out below, not by this. */
+/** Hard deadline measured from fan-out, including the soft waiting period. */
 const ENGINE_TIMEOUT_MS = 12_000;
 /** How long the fan-out waits before returning what it has. */
 const SOFT_DEADLINE_MS = 6_000;
@@ -209,8 +209,11 @@ function dedupKey(rawUrl: string): string {
 function merge(results: readonly EngineResult[], limit: number): Hit[] {
 	const merged = new Map<string, Ranked>();
 	for (const result of results) {
+		const seen = new Set<string>();
 		for (const [rank, hit] of result.hits.entries()) {
 			const key = dedupKey(hit.url);
+			if (seen.has(key)) continue; // The first occurrence is this engine's best rank.
+			seen.add(key);
 			const existing = merged.get(key);
 			if (existing === undefined) {
 				merged.set(key, { hit, engines: 1, rank, order: merged.size });
@@ -232,36 +235,39 @@ export async function search(
 	limit: number,
 	signal?: AbortSignal,
 ): Promise<{ text: string; hits: Hit[] }> {
-	const timeout = AbortSignal.timeout(ENGINE_TIMEOUT_MS);
-	const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
-	const straggler = new AbortController();
-	const race = AbortSignal.any([combined, straggler.signal]);
-	// Each engine writes into `results` as it settles, so a soft deadline can read what is done.
-	const results: EngineResult[] = [];
-	let settled = 0;
-	let finish: (() => void) | undefined;
-	const allDone = new Promise<void>((resolve) => {
-		finish = resolve;
-	});
-	for (const engine of ENGINES) {
-		void runEngine(engine, query, race).then((result) => {
-			results.push(result);
-			settled += 1;
-			if (settled === ENGINES.length) finish?.();
-		});
+	signal?.throwIfAborted();
+	const controller = new AbortController();
+	const { promise: ready, resolve: finish } = Promise.withResolvers<void>();
+	const results: (EngineResult | undefined)[] = [];
+	let softExpired = false;
+	let hasHits = false;
+	let completed = 0;
+	const soft = setTimeout(() => {
+		softExpired = true;
+		if (hasHits) finish();
+	}, SOFT_DEADLINE_MS);
+	const hard = setTimeout(finish, ENGINE_TIMEOUT_MS);
+	const onAbort = () => finish();
+	signal?.addEventListener("abort", onAbort, { once: true });
+	try {
+		for (const [index, engine] of ENGINES.entries()) {
+			void runEngine(engine, query, controller.signal).then((result) => {
+				results[index] = result;
+				hasHits ||= result.hits.length > 0;
+				if (++completed === ENGINES.length || (softExpired && hasHits)) finish();
+			});
+		}
+		await ready;
+		signal?.throwIfAborted();
+	} finally {
+		clearTimeout(soft);
+		clearTimeout(hard);
+		signal?.removeEventListener("abort", onAbort);
+		controller.abort();
 	}
-	const soft = new Promise<"soft">((resolve) => {
-		const timer = setTimeout(() => resolve("soft"), SOFT_DEADLINE_MS);
-		timer.unref();
-	});
-	const outcome = await Promise.race([allDone, soft]);
-	if (outcome === "soft" && results.length === 0) {
-		// Nothing arrived in time: wait for the first engine rather than answer with nothing.
-		await Promise.race([allDone, new Promise((resolve) => setTimeout(resolve, ENGINE_TIMEOUT_MS).unref())]);
-	}
-	straggler.abort();
-	const hits = merge(results, limit);
-	const failures = results.filter((result) => result.error !== undefined).map((result) => result.error);
+	const received = results.filter((result): result is EngineResult => result !== undefined);
+	const hits = merge(received, limit);
+	const failures = received.flatMap((result) => result.error ?? []);
 	if (hits.length === 0) {
 		const reason = failures.length > 0 ? failures.join("; ") : "no results";
 		return { text: `No results for "${query}" (${reason})`, hits: [] };
@@ -280,7 +286,7 @@ const parameters = Type.Object({
 	limit: Type.Optional(Type.Number({ description: `Results to return, default ${DEFAULT_LIMIT}` })),
 });
 
-/** The `web_search` tool: keyless search over Mojeek, DuckDuckGo and Hacker News. */
+/** The keyless search tool for DuckDuckGo and Hacker News. */
 export function webSearchTool() {
 	return defineTool({
 		name: "web_search",
@@ -289,9 +295,9 @@ export function webSearchTool() {
 			"Search the web. Returns numbered results with title, URL and snippet. Use it when the answer depends on current information, or when the user gives a URL or a topic to look up.",
 		promptSnippet: "web_search: search the web for current information",
 		parameters,
-		async execute(_toolCallId: string, params: { query: string; limit?: number }) {
+		async execute(_toolCallId: string, params: { query: string; limit?: number }, signal?: AbortSignal) {
 			const limit = params.limit !== undefined && params.limit > 0 ? Math.min(params.limit, 20) : DEFAULT_LIMIT;
-			const { text: body } = await search(params.query, limit);
+			const { text: body } = await search(params.query, limit, signal);
 			return { content: [{ type: "text" as const, text: body }], details: undefined };
 		},
 	});

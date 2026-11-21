@@ -110,6 +110,8 @@ export interface CreateModelRuntimeOptions {
 	credentials?: CredentialStore;
 	authPath?: string;
 	modelsPath?: string | null;
+	/** Use only builtin OAuth, catalogs and transports for builtin IDs. Independent providers are unaffected. */
+	builtinOAuthOnly?: boolean;
 	modelsStore?: ModelsStore;
 	modelsStorePath?: string;
 	/** Allow create() to refresh model catalogs over the network. Defaults to false. */
@@ -172,7 +174,7 @@ export class ModelRuntime implements Models {
 	private readonly models: MutableModels;
 	private readonly credentials: RuntimeCredentials;
 	private readonly defaultBuiltins: ReadonlyMap<string, Provider>;
-	private readonly builtins = new Map<string, Provider>();
+	private readonly builtinOAuthOnly: boolean;
 	private readonly nativeExtensionProviders = new Map<string, Provider>();
 	private readonly extensionProviders = new Map<string, ProviderConfigInput>();
 	/** Virtual models by provider id, then model id. */
@@ -201,13 +203,19 @@ export class ModelRuntime implements Models {
 		modelsStore: ModelsStore,
 		providers: readonly Provider[],
 		modelNetworkEnabled: boolean,
+		builtinOAuthOnly: boolean,
 	) {
 		this.credentials = credentials;
 		this.config = config;
 		this.modelsPath = modelsPath;
 		this.modelNetworkEnabled = modelNetworkEnabled;
+		this.builtinOAuthOnly = builtinOAuthOnly;
+		// create() constructs fresh provider instances. Narrow their methods once, keeping their
+		// transport and account-specific catalog state intact through recomposition.
+		if (builtinOAuthOnly) {
+			for (const provider of providers) delete provider.auth.apiKey;
+		}
 		this.defaultBuiltins = new Map(providers.map((provider) => [provider.id, provider]));
-		for (const [providerId, provider] of this.defaultBuiltins) this.builtins.set(providerId, provider);
 		this.models = createModels({ credentials, modelsStore });
 		this.rebuildProviders();
 	}
@@ -230,8 +238,8 @@ export class ModelRuntime implements Models {
 			modelsStore,
 			providers,
 			process.env.NEKOPAL_OFFLINE === undefined,
+			options.builtinOAuthOnly === true,
 		);
-		runtime.rebuildProviders();
 		const refreshFromNetwork = runtime.modelNetworkEnabled && options.allowModelNetwork === true;
 		const controller =
 			refreshFromNetwork && options.modelRefreshTimeoutMs !== undefined ? new AbortController() : undefined;
@@ -243,7 +251,8 @@ export class ModelRuntime implements Models {
 			: options.signal;
 		try {
 			if (options.refreshOnCreate !== false) {
-				await runtime.refresh({ allowNetwork: refreshFromNetwork, signal });
+				// A catalog timeout must not hide accounts whose local OAuth checks still succeed.
+				await runtime.refreshWithAvailabilitySignal({ allowNetwork: refreshFromNetwork, signal }, options.signal);
 			}
 		} finally {
 			if (timeout) clearTimeout(timeout);
@@ -251,9 +260,13 @@ export class ModelRuntime implements Models {
 		return runtime;
 	}
 
+	private oauthOnlyBuiltin(providerId: string): Provider | undefined {
+		return this.builtinOAuthOnly ? this.defaultBuiltins.get(providerId) : undefined;
+	}
+
 	private providerIds(): Set<string> {
 		return new Set([
-			...this.builtins.keys(),
+			...this.defaultBuiltins.keys(),
 			...this.nativeExtensionProviders.keys(),
 			...this.config.getProviderIds(),
 			...this.extensionProviders.keys(),
@@ -273,7 +286,10 @@ export class ModelRuntime implements Models {
 
 	/** The provider without virtual models, or undefined when nothing defines it. */
 	private composeProvider(providerId: string): Provider | undefined {
-		const base = this.nativeExtensionProviders.get(providerId) ?? this.builtins.get(providerId);
+		// Re-registration and refresh must not hand a builtin OAuth token to an overlay's transport or hooks.
+		const builtin = this.oauthOnlyBuiltin(providerId);
+		if (builtin) return builtin;
+		const base = this.nativeExtensionProviders.get(providerId) ?? this.defaultBuiltins.get(providerId);
 		const extension = this.extensionProviders.get(providerId);
 		if (!this.config.getProvider(providerId) && !extension) {
 			// No overlays: use the builtin untouched so its auth/login/stream behavior is exact.
@@ -500,6 +516,9 @@ export class ModelRuntime implements Models {
 
 	/** @internal Compatibility fallback for ModelRegistry when provider auth is unconfigured. */
 	getCompatibilityRequestConfig(model: Model<Api>): CompatibilityRequestConfig {
+		if (this.oauthOnlyBuiltin(model.provider)) {
+			throw new ModelsError("auth", `OAuth login required: ${model.provider}`);
+		}
 		return resolveCompatibilityRequestConfig(
 			model,
 			this.config.getProvider(model.provider),
@@ -525,6 +544,14 @@ export class ModelRuntime implements Models {
 		providerOrModel: string | AnyModel,
 		overrides: ModelRuntimeAuthOverrides = {},
 	): Promise<AuthResult | undefined> {
+		const providerId = typeof providerOrModel === "string" ? providerOrModel : providerOrModel.provider;
+		if (this.oauthOnlyBuiltin(providerId)) {
+			// Resolve by ID, not by model: a caller-supplied model can carry its own headers.
+			return this.models.getAuth(providerId, {
+				signal: overrides.signal,
+				minOAuthValidityMs: overrides.minOAuthValidityMs,
+			});
+		}
 		if (typeof providerOrModel === "string") return this.models.getAuth(providerOrModel, overrides);
 		const resolution = await this.models.getAuth(providerOrModel, overrides);
 		if (!resolution) return undefined;
@@ -586,6 +613,9 @@ export class ModelRuntime implements Models {
 	}
 
 	setRuntimeApiKey(providerId: string, apiKey: string, options: AuthOperationOptions = {}): Promise<void> {
+		if (this.oauthOnlyBuiltin(providerId)) {
+			return Promise.reject(new ModelsError("auth", `Provider ${providerId} only supports OAuth`));
+		}
 		const signal = operationSignal(options.signal);
 		return this.enqueueCredentialOperation(providerId, signal, async () => {
 			this.credentials.setRuntimeApiKey(providerId, apiKey);
@@ -619,6 +649,9 @@ export class ModelRuntime implements Models {
 	}
 
 	getProviderAuthStatus(providerId: string): AuthStatus {
+		if (this.oauthOnlyBuiltin(providerId)) {
+			return this.isUsingOAuth(providerId) ? { configured: true, source: "stored" } : { configured: false };
+		}
 		if (this.credentials.hasRuntimeApiKey(providerId)) return { configured: true, source: "runtime" };
 		if (this.snapshot.storedProviders.has(providerId)) return { configured: true, source: "stored" };
 		const configured = configuredRequestAuthStatus(
@@ -641,7 +674,8 @@ export class ModelRuntime implements Models {
 		model: TModel;
 		options: Omit<TOptions, "transformHeaders"> & ProviderRequestOptions<TModel>;
 	}> {
-		const provider = this.models.getProvider(model.provider);
+		const builtin = this.oauthOnlyBuiltin(model.provider);
+		const provider = builtin ?? this.models.getProvider(model.provider);
 		if (!provider) throw new ModelsError("provider", `Unknown provider: ${model.provider}`);
 		const resolution = await this.getAuth(model, {
 			apiKey: options?.apiKey,
@@ -652,6 +686,24 @@ export class ModelRuntime implements Models {
 
 		const { transformHeaders, ...rawProviderOptions } = options ?? {};
 		const providerOptions = rawProviderOptions as Omit<TOptions, "transformHeaders"> & ProviderRequestOptions<TModel>;
+		if (builtin) {
+			// The caller may be holding a model from another runtime. Dispatch the original catalog
+			// entry, never that model's API, endpoint or headers, and don't reapply caller credentials.
+			const canonical = (builtin.getAllModels?.() ?? builtin.getModels()).find(
+				(entry) => entry.id === model.id && (entry.type ?? "chat") === (model.type ?? "chat"),
+			);
+			if (!canonical) throw new ModelsError("provider", `Unknown builtin model: ${model.provider}/${model.id}`);
+			return {
+				provider,
+				model: (resolution.auth.baseUrl ? { ...canonical, baseUrl: resolution.auth.baseUrl } : canonical) as TModel,
+				options: {
+					...providerOptions,
+					apiKey: resolution.auth.apiKey,
+					headers: mergeHeaders(canonical.headers, resolution.auth.headers),
+					env: resolution.env,
+				},
+			};
+		}
 		const requestModel: TModel = resolution.auth.baseUrl ? { ...model, baseUrl: resolution.auth.baseUrl } : model;
 		const sessionId =
 			"sessionId" in providerOptions && typeof providerOptions.sessionId === "string"
@@ -848,7 +900,14 @@ export class ModelRuntime implements Models {
 		});
 	}
 
-	async refresh(options: ModelsRefreshOptions = {}): Promise<ModelsRefreshResult> {
+	refresh(options: ModelsRefreshOptions = {}): Promise<ModelsRefreshResult> {
+		return this.refreshWithAvailabilitySignal(options, options.signal);
+	}
+
+	private async refreshWithAvailabilitySignal(
+		options: ModelsRefreshOptions,
+		availabilitySignal: AbortSignal | undefined,
+	): Promise<ModelsRefreshResult> {
 		this.config = await ModelConfig.load(this.modelsPath);
 		if (options.providers) {
 			for (const providerId of new Set(options.providers)) this.recomposeProvider(providerId);
@@ -872,9 +931,9 @@ export class ModelRuntime implements Models {
 			await Promise.all(
 				[...new Set(options.providers)].map(async (providerId) => {
 					try {
-						await this.refreshProviderAvailability(providerId, operationSignal(options.signal));
+						await this.refreshProviderAvailability(providerId, operationSignal(availabilitySignal));
 					} catch (error) {
-						if (!options.signal?.aborted) {
+						if (!availabilitySignal?.aborted) {
 							errors.set(providerId, error instanceof Error ? error : new Error(String(error)));
 						}
 					}
@@ -882,7 +941,7 @@ export class ModelRuntime implements Models {
 			);
 		} else {
 			try {
-				await this.queueAvailabilityRefresh(options.signal);
+				await this.queueAvailabilityRefresh(availabilitySignal);
 			} catch {
 				// Availability errors are recorded by the latest pass; refreshed models remain usable.
 			}
@@ -896,11 +955,7 @@ export class ModelRuntime implements Models {
 		this.nativeExtensionProviders.set(provider.id, provider);
 		this.recomposeProvider(provider.id);
 		this.updateModelSnapshot();
-		this.markProvisionallyConfigured(
-			provider.id,
-			configuredRequestAuthStatus(this.config.getProvider(provider.id), undefined),
-			provider.auth.oauth && !provider.auth.apiKey ? "oauth" : "api_key",
-		);
+		this.markProvisionallyConfigured(provider.id, provider.auth.oauth && !provider.auth.apiKey ? "oauth" : "api_key");
 		void this.refresh({ allowNetwork: false });
 	}
 
@@ -909,11 +964,12 @@ export class ModelRuntime implements Models {
 	 * API key. Availability checks run asynchronously, and callers such as initial model selection
 	 * read the snapshot before they finish. The next availability pass replaces this entry.
 	 */
-	private markProvisionallyConfigured(
-		providerId: string,
-		configuredStatus: AuthStatus | undefined,
-		type: AuthType,
-	): void {
+	private markProvisionallyConfigured(providerId: string, type: AuthType): void {
+		if (this.oauthOnlyBuiltin(providerId)) return;
+		const configuredStatus = configuredRequestAuthStatus(
+			this.config.getProvider(providerId),
+			this.extensionProviders.get(providerId),
+		);
 		if (!this.snapshot.storedProviders.has(providerId) && !configuredStatus?.configured) return;
 		const configuredProviders = new Set(this.snapshot.configuredProviders).add(providerId);
 		const auth = new Map(this.snapshot.auth);
@@ -930,7 +986,12 @@ export class ModelRuntime implements Models {
 	registerProvider(providerId: string, config: ProviderConfigInput): void {
 		// Validate the incoming registration on its own, like the legacy registry:
 		// a broken re-registration must throw without touching the stored config.
-		validateExtensionProvider(providerId, this.builtins.get(providerId), this.config.getProvider(providerId), config);
+		validateExtensionProvider(
+			providerId,
+			this.defaultBuiltins.get(providerId),
+			this.config.getProvider(providerId),
+			config,
+		);
 		this.nativeExtensionProviders.delete(providerId);
 		// Re-registration merges defined values over the previous registration and
 		// preserves undefined ones, matching the legacy ModelRegistry contract.
@@ -942,11 +1003,7 @@ export class ModelRuntime implements Models {
 		this.extensionProviders.set(providerId, effective);
 		this.recomposeProvider(providerId);
 		this.updateModelSnapshot();
-		this.markProvisionallyConfigured(
-			providerId,
-			configuredRequestAuthStatus(this.config.getProvider(providerId), effective),
-			effective.oauth && !effective.apiKey ? "oauth" : "api_key",
-		);
+		this.markProvisionallyConfigured(providerId, effective.oauth && !effective.apiKey ? "oauth" : "api_key");
 		void this.refresh({ allowNetwork: false });
 	}
 
@@ -966,6 +1023,9 @@ export class ModelRuntime implements Models {
 	registerVirtualModel(definition: VirtualModelDefinition): void {
 		const { provider: providerId, id } = definition;
 		if (!providerId.trim() || !id.trim()) throw new Error("Virtual model provider and id must not be empty.");
+		if (this.oauthOnlyBuiltin(providerId)) {
+			throw new Error(`Virtual models must use a separate provider ID in builtin OAuth-only mode: ${providerId}`);
+		}
 		const existing = this.models.getModel(providerId, id);
 		if (existing && !isVirtualModel(existing)) {
 			throw new Error(`Virtual model ${providerId}/${id} conflicts with a physical model.`);

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { afterEach } from "vitest";
-import type { Adapter, Caps, Inbound, Keyboard, SentHandle } from "../../src/channel/types.ts";
+import type { Adapter, Caps, ChannelName, Inbound, Keyboard, SentHandle } from "../../src/channel/types.ts";
 import { Dispatcher } from "../../src/chat/dispatch.ts";
 import { ChatRegistry } from "../../src/chat/registry.ts";
 import { JobStore } from "../../src/cron/store.ts";
@@ -16,16 +16,23 @@ const caps: Caps = { edit: true, stream: false, rich: true, maxChars: 4_000 };
 
 /** Records what the dispatcher sends; `next(needle)` resolves with the first message containing it. */
 export class FakeAdapter implements Adapter {
-	readonly name = "telegram" as const;
-	readonly caps = caps;
+	readonly name: ChannelName;
+	readonly caps: Caps;
 	readonly sent: string[] = [];
 	readonly edits: string[] = [];
 	readonly editedIds: string[] = [];
 	readonly deleted: string[] = [];
 	/** The buttons each send or edit carried, so a test can assert the panel's layout. */
 	readonly keyboards: Array<Keyboard | undefined> = [];
+	readonly panels = new Map<string, Keyboard>();
+	readonly panelSends: Array<{ id: string; replyTo?: string }> = [];
 	private nextId = 1;
 	private readonly waiters: Array<{ needle: string; resolve(text: string): void }> = [];
+
+	constructor(channel: ChannelName = "telegram") {
+		this.name = channel;
+		this.caps = { ...caps, edit: channel === "telegram" };
+	}
 
 	async start(): Promise<void> {}
 	async stop(): Promise<void> {}
@@ -54,10 +61,14 @@ export class FakeAdapter implements Adapter {
 		return [{ id: String(this.nextId++) }];
 	}
 
-	async sendRich(_chatId: string, markdown: string, _replyTo?: string, keyboard?: Keyboard): Promise<SentHandle> {
+	async sendRich(_chatId: string, markdown: string, replyTo?: string, keyboard?: Keyboard): Promise<SentHandle> {
 		const handle = { id: String(this.nextId++) };
 		this.sent.push(markdown);
 		this.keyboards.push(keyboard);
+		if (keyboard !== undefined) {
+			this.panels.set(handle.id, keyboard);
+			this.panelSends.push({ id: handle.id, replyTo });
+		}
 		this.resolveWaiters(markdown);
 		return handle;
 	}
@@ -67,6 +78,7 @@ export class FakeAdapter implements Adapter {
 		this.edits.push(markdown);
 		this.editedIds.push(handle.id);
 		this.keyboards.push(keyboard);
+		if (keyboard !== undefined) this.panels.set(handle.id, keyboard);
 		this.resolveWaiters(markdown);
 		return true;
 	}
@@ -90,8 +102,17 @@ afterEach(async () => {
 export interface Harness {
 	adapter: FakeAdapter;
 	faux: ReturnType<typeof registerFauxProvider>;
-	deliver(text: string, userId?: string): Promise<void>;
-	press(data: string): Promise<void>;
+	agentDir: string;
+	workspace: string;
+	settingsManager: SettingsManager;
+	modelRuntime: ModelRuntime;
+	jobs: JobStore;
+	memory: MemoryStore;
+	pending: PendingStore;
+	state: StateStore;
+	registry: ChatRegistry;
+	deliver(text: string, userId?: string, messageId?: string): Promise<void>;
+	press(data: string, messageId?: string): Promise<void>;
 	settle(): Promise<void>;
 }
 
@@ -100,7 +121,7 @@ export async function settle(): Promise<void> {
 	for (let index = 0; index < 10; index++) await new Promise((resolve) => setImmediate(resolve));
 }
 
-export async function createHarness(options: { allowed?: string[] } = {}): Promise<Harness> {
+export async function createHarness(options: { allowed?: string[]; channel?: ChannelName } = {}): Promise<Harness> {
 	const root = mkdtempSync(join(tmpdir(), "nekopal-dispatch-"));
 	const agentDir = join(root, "agent");
 	const workspace = join(root, "workspace");
@@ -144,7 +165,7 @@ export async function createHarness(options: { allowed?: string[] } = {}): Promi
 	const jobs = new JobStore(join(root, "jobs.json"));
 	const skills = new SkillStore(join(root, "skills"));
 
-	const adapter = new FakeAdapter();
+	const adapter = new FakeAdapter(options.channel);
 	const registry = new ChatRegistry({
 		state,
 		workspace,
@@ -172,7 +193,7 @@ export async function createHarness(options: { allowed?: string[] } = {}): Promi
 		skills,
 		startedAt: Date.now(),
 		version: "0.1.0",
-		enabledChannels: ["telegram"],
+		enabledChannels: [adapter.name],
 		allowed: (_channel, userId) => (options.allowed ?? ["42"]).includes(userId),
 	});
 
@@ -184,22 +205,31 @@ export async function createHarness(options: { allowed?: string[] } = {}): Promi
 	return {
 		adapter,
 		faux,
-		async press(data: string): Promise<void> {
+		agentDir,
+		workspace,
+		settingsManager,
+		modelRuntime,
+		jobs,
+		memory,
+		pending,
+		state,
+		registry,
+		async press(data: string, messageId = "callback"): Promise<void> {
 			dispatcher.handleAction({
-				channel: "telegram",
+				channel: adapter.name,
 				chatId: "42",
 				userId: "42",
-				messageId: String(Date.now()),
+				messageId,
 				data,
 			});
 			await settle();
 		},
-		async deliver(text: string, userId = "42"): Promise<void> {
+		async deliver(text: string, userId = "42", messageId = "inbound"): Promise<void> {
 			const message: Inbound = {
-				channel: "telegram",
+				channel: adapter.name,
 				chatId: "42",
 				userId,
-				messageId: String(Date.now()),
+				messageId,
 				text,
 				attachments: [],
 			};

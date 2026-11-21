@@ -1,17 +1,15 @@
 /**
  * The panel pages: plain data in, message text and button rows out.
  *
- * Every button maps onto a command the user could have typed, so the panel is only a visual entry
- * point and `/help` can never drift from it.
+ * Callback keys identify entries independently of their current position.
  */
 
-import type { Lang } from "../channel/types.ts";
-import { describe, formatUptime } from "../commands/index.ts";
-import { formatJobs } from "../commands/jobs.ts";
+import type { Lang, ReplyFormat } from "../channel/types.ts";
+import { formatUptime } from "../commands/index.ts";
 import type { StoredEntry } from "../commands/memory.ts";
 import type { Job } from "../cron/store.ts";
 import { t } from "../i18n/index.ts";
-import { actButton, navButton, type PanelButton, type PanelPage, runButton } from "./encode.ts";
+import { actButton, navButton, type PanelButton, type PanelPage, panelKey, runButton } from "./encode.ts";
 import { API_KINDS, type ApiKind } from "./models-json.ts";
 
 /** One provider as the panel shows it. */
@@ -27,6 +25,7 @@ export interface ProviderView {
 /** Everything a page renders from, captured once per render so the functions stay pure. */
 export interface PanelSnapshot {
 	readonly lang: Lang;
+	readonly telegramReplyFormat?: ReplyFormat;
 	readonly version: string;
 	readonly model: string;
 	readonly thinking: string;
@@ -44,6 +43,8 @@ export interface PanelSnapshot {
 	readonly stored: readonly StoredEntry[];
 	readonly pending: number;
 	readonly pendingLines: string;
+	readonly pendingKey: string;
+	readonly configReadFailed?: boolean;
 	readonly jobs: readonly Job[];
 	/** Every configured provider's model ids, untruncated. */
 	readonly modelsByProvider: readonly { id: string; models: readonly string[] }[];
@@ -53,32 +54,57 @@ export interface PanelSnapshot {
 	readonly qqQuota?: string;
 }
 
-/** Parse the `mdl` page's argument slot: `provider`, optionally followed by a page number. */
-function parseMdlArg(arg: string, snapshot: PanelSnapshot): [string, number] {
-	const [provider, page] = arg.trim().split(/\s+/);
-	const known = snapshot.modelsByProvider.some((candidate) => candidate.id === provider);
-	const number = Number(page);
-	return [known ? provider : "", Number.isInteger(number) && number >= 0 ? number : 0];
-}
-
 /** One rendered page. */
 export interface PanelView {
 	readonly text: string;
 	readonly rows: ReadonlyArray<ReadonlyArray<PanelButton>>;
 }
 
-/** Buttons per row, so a wide page still reads as a grid on a phone. */
 const PER_ROW = 2;
-/** Stored memories a page shows as forget buttons. */
-const FORGET_BUTTONS = 8;
-/** Jobs a page shows. */
-const JOB_BUTTONS = 4;
-/** Model buttons one provider page shows before paging. */
-const MODEL_PAGE_SIZE = 10;
-/** Page buttons a provider page shows at once. */
-const MAX_PAGE_BUTTONS = 5;
-/** Providers a page shows. */
-const PROVIDER_BUTTONS = 6;
+const GRID_SIZE = 6;
+
+export function preview(text: string, max = 240): string {
+	const flat = text.replace(/\s+/g, " ");
+	return flat.length <= max ? flat : `${flat.slice(0, max - 1).replace(/[\uD800-\uDBFF]$/, "")}…`;
+}
+
+export function pageSlice<T>(items: readonly T[], page: number, size = GRID_SIZE) {
+	const pages = Math.max(1, Math.ceil(items.length / size));
+	const current = Number.isInteger(page) && page >= 0 ? Math.min(page, pages - 1) : 0;
+	const start = current * size;
+	return { items: items.slice(start, start + size), current, pages, start };
+}
+
+export function pageFooter(
+	lang: Lang,
+	parent: PanelPage,
+	current: number,
+	pages: number,
+	data: (page: number) => string,
+) {
+	const row: PanelButton[] = [];
+	if (current > 0) row.push(actButton(t(lang, "panel.prev"), data(current - 1)));
+	if (current + 1 < pages) row.push(actButton(t(lang, "panel.next"), data(current + 1)));
+	row.push(navButton(t(lang, "panel.back"), parent));
+	return row;
+}
+
+function pagedRows(
+	lang: Lang,
+	page: PanelPage,
+	parent: PanelPage,
+	slice: { current: number; pages: number },
+	rows: PanelButton[][],
+	fixed: PanelButton[] = [],
+): PanelButton[][] {
+	if (fixed.length) rows.push(fixed);
+	rows.push(pageFooter(lang, parent, slice.current, slice.pages, (n) => `pg:${page}:${n}`));
+	return rows;
+}
+
+function pageTitle(title: string, slice: { current: number; pages: number }): string {
+	return slice.pages > 1 ? `${title} (${slice.current + 1}/${slice.pages})` : title;
+}
 
 /** Lay `buttons` out in rows of `PER_ROW`. */
 function grid(buttons: readonly PanelButton[]): PanelButton[][] {
@@ -94,136 +120,137 @@ function withBack(page: PanelPage, lang: Lang, buttons: readonly PanelButton[]):
 	return rows;
 }
 
-/** The top page: what NekoPal is doing, and one button per area. */
 function settingsPage(snapshot: PanelSnapshot): PanelView {
 	const { lang } = snapshot;
-	const percent = Math.round((snapshot.memoryUsage.memory / Math.max(1, snapshot.memoryBudget.memory)) * 100);
-	const text = [
-		t(lang, "panel.title", { version: snapshot.version }),
-		t(lang, "settings.model", { model: snapshot.model, thinking: snapshot.thinking }),
-		t(lang, "settings.lang", { lang }),
-		t(lang, "settings.memory", {
-			memory: snapshot.memoryUsage.memory,
-			memoryBudget: snapshot.memoryBudget.memory,
-			memoryPercent: percent,
-			user: snapshot.memoryUsage.user,
-			userBudget: snapshot.memoryBudget.user,
-		}),
-		t(lang, "panel.counts", {
-			pending: snapshot.pending,
-			jobs: snapshot.jobs.filter((job) => job.enabled).length,
-		}),
-	].join("\n");
 	return {
-		text,
+		text: [
+			t(lang, "panel.title", { version: preview(snapshot.version) }),
+			t(lang, "settings.model", { model: preview(snapshot.model), thinking: snapshot.thinking }),
+			t(lang, "panel.counts", {
+				pending: snapshot.pending,
+				jobs: snapshot.jobs.filter((job) => job.enabled).length,
+			}),
+		].join("\n"),
 		rows: [
-			[navButton(t(lang, "panel.mdl"), "mdl"), navButton(t(lang, "panel.pvd"), "pvd")],
-			[navButton(t(lang, "panel.ses"), "ses"), navButton(t(lang, "panel.pkg"), "pkg")],
+			[navButton(t(lang, "panel.ses"), "ses"), navButton(t(lang, "panel.mdl"), "mdl")],
 			[navButton(t(lang, "panel.mem"), "mem"), navButton(t(lang, "panel.job"), "job")],
-			[
-				runButton(t(lang, "panel.langZh"), "set", "lang", "zh", "/settings lang zh"),
-				runButton(t(lang, "panel.langEn"), "set", "lang", "en", "/settings lang en"),
-			],
+			[navButton(t(lang, "panel.sys"), "sys"), actButton(t(lang, "panel.close"), "set:close")],
 		],
 	};
 }
 
-/**
- * The model root: one button per configured provider, marked when it owns the current model.
- * Picking a provider opens its paged model list, so any number of models stays reachable.
- */
-function modelsPage(snapshot: PanelSnapshot): PanelView {
+function systemPage(snapshot: PanelSnapshot): PanelView {
+	const { lang, memoryUsage, memoryBudget } = snapshot;
+	return {
+		text: [
+			t(lang, "panel.sys"),
+			t(lang, "status.running", { version: preview(snapshot.version), uptime: formatUptime(snapshot.uptimeMs) }),
+			t(lang, "status.chats", { chats: snapshot.chats, running: snapshot.running }),
+			t(lang, "settings.lang", { lang }),
+			t(lang, "settings.memory", {
+				memory: memoryUsage.memory,
+				memoryBudget: memoryBudget.memory,
+				memoryPercent: Math.round((memoryUsage.memory / Math.max(1, memoryBudget.memory)) * 100),
+				user: memoryUsage.user,
+				userBudget: memoryBudget.user,
+			}),
+			t(lang, "panel.channels", { channels: preview(snapshot.channels.join(", ")) || "—" }),
+			snapshot.qqQuota && preview(snapshot.qqQuota),
+		]
+			.filter(Boolean)
+			.join("\n"),
+		rows: [
+			[
+				navButton(t(lang, "panel.pkg"), "pkg"),
+				runButton(t(lang, "panel.langZh"), "sys", "lang", "zh"),
+				runButton(t(lang, "panel.langEn"), "sys", "lang", "en"),
+			],
+			...(snapshot.telegramReplyFormat
+				? [
+						(["rich", "mdv2"] as const).map((format) =>
+							runButton(
+								`${snapshot.telegramReplyFormat === format ? "✓ " : ""}${format === "rich" ? t(lang, "panel.rich") : "MarkdownV2"}`,
+								"sys",
+								"fmt",
+								format,
+							),
+						),
+					]
+				: []),
+			[navButton(t(lang, "panel.back"), "set")],
+		],
+	};
+}
+
+function modelsPage(snapshot: PanelSnapshot, page: number): PanelView {
 	const { lang } = snapshot;
-	const currentProvider = snapshot.model.split("/")[0];
-	const buttons = snapshot.modelsByProvider.map((provider) =>
+	const slice = pageSlice(snapshot.modelsByProvider, page);
+	const buttons = slice.items.map((provider) =>
 		runButton(
-			`${provider.id === currentProvider ? "✅ " : ""}${provider.id} (${provider.models.length})`,
+			`${snapshot.model.startsWith(`${provider.id}/`) ? "✅ " : ""}${preview(provider.id, 48)} (${provider.models.length})`,
 			"mdl",
 			"pvd",
-			provider.id,
-			`/settings mdl ${provider.id}`,
+			panelKey([provider.id]),
 		),
 	);
-	return { text: t(lang, "panel.mdlTitle", { model: snapshot.model }), rows: withBack("mdl", lang, buttons) };
+	const title = t(lang, "panel.mdlTitle", { model: preview(snapshot.model) });
+	return {
+		text: [pageTitle(title, slice), ...(buttons.length ? [] : [t(lang, "panel.empty")])].join("\n"),
+		rows: pagedRows(lang, "mdl", "set", slice, grid(buttons), [navButton(t(lang, "panel.pvd"), "pvd")]),
+	};
 }
 
-/**
- * One provider's models, paged. The `page` argument arrives through the panel's page slot
- * (`arg` is `provider` on the provider page itself).
- */
-function providerModelsPage(snapshot: PanelSnapshot, providerId: string, page: number): PanelView {
+function providerModelsPage(
+	snapshot: PanelSnapshot,
+	provider: PanelSnapshot["modelsByProvider"][number],
+	page: number,
+): PanelView {
 	const { lang } = snapshot;
-	const provider = snapshot.modelsByProvider.find((candidate) => candidate.id === providerId);
-	if (provider === undefined) return modelsPage(snapshot);
-	const pages = Math.max(1, Math.ceil(provider.models.length / MODEL_PAGE_SIZE));
-	const current = Math.min(Math.max(page, 0), pages - 1);
-	const slice = provider.models.slice(current * MODEL_PAGE_SIZE, (current + 1) * MODEL_PAGE_SIZE);
-	const lines = [t(lang, "panel.mdlTitle", { model: snapshot.model }), `— ${providerId} (${current + 1}/${pages})`];
-	const buttons: PanelButton[] = [];
-	for (const [offset, id] of slice.entries()) {
-		const index = current * MODEL_PAGE_SIZE + offset;
-		const currentModel = snapshot.model === `${providerId}/${id}`;
-		buttons.push(
+	const { id } = provider;
+	const slice = pageSlice(provider.models, page);
+	const rows = grid(
+		slice.items.map((model) =>
 			runButton(
-				currentModel ? `✅ ${id}` : id,
+				`${snapshot.model === `${id}/${model}` ? "✅ " : ""}${preview(model, 56)}`,
 				"mdl",
 				"set",
-				`${providerId}:${index}`,
-				`/model ${providerId}/${id}`,
+				panelKey([id, model]),
 			),
-		);
-	}
-	const rows = grid(buttons);
-	if (pages > 1) {
-		const pageRow: PanelButton[] = [];
-		if (current > 0) {
-			pageRow.push(
-				runButton("⬅️", "mdl", "pg", `${providerId}:${current - 1}`, `/settings mdl ${providerId} ${current - 1}`),
-			);
-		}
-		const from = Math.max(0, Math.min(current - Math.floor(MAX_PAGE_BUTTONS / 2), pages - MAX_PAGE_BUTTONS));
-		for (let index = from; index < Math.min(pages, from + MAX_PAGE_BUTTONS); index += 1) {
-			pageRow.push(
-				runButton(
-					index === current ? `·${index + 1}·` : String(index + 1),
-					"mdl",
-					"pg",
-					`${providerId}:${index}`,
-					`/settings mdl ${providerId} ${index}`,
-				),
-			);
-		}
-		if (current < pages - 1) {
-			pageRow.push(
-				runButton("➡️", "mdl", "pg", `${providerId}:${current + 1}`, `/settings mdl ${providerId} ${current + 1}`),
-			);
-		}
-		rows.push(pageRow);
-	}
-	rows.push([navButton(t(lang, "panel.back"), "mdl")]);
-	return { text: lines.join("\n"), rows };
+		),
+	);
+	rows.push(pageFooter(lang, "mdl", slice.current, slice.pages, (n) => `mdl:pg:${panelKey([id])}:${n}`));
+	return {
+		text: [t(lang, "panel.mdlTitle", { model: preview(snapshot.model) }), pageTitle(preview(id), slice)].join("\n"),
+		rows,
+	};
 }
 
-function providersPage(snapshot: PanelSnapshot): PanelView {
+function providersPage(snapshot: PanelSnapshot, page: number): PanelView {
 	const { lang } = snapshot;
-	const lines = [t(lang, "panel.pvdTitle")];
-	const buttons: PanelButton[] = [];
-	for (const provider of snapshot.providers.slice(0, PROVIDER_BUTTONS)) {
-		const mark = provider.configured ? "✅" : "⬜";
-		lines.push(`${mark} ${provider.id}${provider.custom ? " · custom" : ""}`);
-		if (provider.custom) {
-			buttons.push(runButton(`🗑 ${provider.id}`, "pvd", "rm", provider.id, `/settings pvd rm ${provider.id}`));
-		}
-	}
-	buttons.push(actButton(t(lang, "panel.pvdAdd"), "pvd:add"));
-	buttons.push(actButton(t(lang, "panel.login"), "pvd:login"));
-	buttons.push(actButton(t(lang, "panel.logout"), "pvd:logout"));
-	return { text: lines.join("\n"), rows: withBack("pvd", lang, buttons) };
+	const slice = pageSlice(snapshot.providers, page);
+	const lines = slice.items.map(
+		(provider) => `${provider.configured ? "✅" : "⬜"} ${preview(provider.id)}${provider.custom ? " · custom" : ""}`,
+	);
+	const buttons = slice.items
+		.filter((provider) => provider.custom)
+		.map((provider) => runButton(`🗑 ${preview(provider.id, 52)}`, "pvd", "rm", panelKey([provider.id])));
+	return {
+		text: [
+			pageTitle(t(lang, "panel.pvdTitle"), slice),
+			...(snapshot.configReadFailed ? [t(lang, "wizard.readFailed")] : []),
+			...(lines.length ? lines : [t(lang, "panel.empty")]),
+		].join("\n"),
+		rows: pagedRows(lang, "pvd", "mdl", slice, grid(buttons), [
+			actButton(t(lang, "panel.login"), "pvd:login"),
+			actButton(t(lang, "panel.logout"), "pvd:logout"),
+			actButton(t(lang, "panel.pvdAdd"), "pvd:add"),
+		]),
+	};
 }
 
 /** The API-kind step of the custom-provider wizard: one button per shape. */
-export function apiKindRows(): PanelButton[][] {
-	return grid(API_KINDS.map((kind: ApiKind) => actButton(kind, `pvd:api:${kind}`)));
+export function apiKindRows(flowId: string): PanelButton[][] {
+	return grid(API_KINDS.map((kind: ApiKind, index) => actButton(kind, `pvd:api:${index}:${flowId}`)));
 }
 
 function sessionsPage(snapshot: PanelSnapshot): PanelView {
@@ -243,85 +270,93 @@ function sessionsPage(snapshot: PanelSnapshot): PanelView {
 		}),
 	].join("\n");
 	const buttons = [
-		runButton(t(lang, "panel.new"), "ses", "new", "", "/new"),
-		runButton(t(lang, "panel.list"), "ses", "list", "", "/sessions"),
-		runButton(t(lang, "panel.stop"), "ses", "stop", "", "/stop"),
+		runButton(t(lang, "panel.new"), "ses", "new", ""),
+		runButton(t(lang, "panel.list"), "ses", "list", ""),
+		runButton(t(lang, "panel.stop"), "ses", "stop", ""),
 	];
 	return { text, rows: withBack("ses", lang, buttons) };
 }
 
-function packagesPage(snapshot: PanelSnapshot): PanelView {
+function packagesPage(snapshot: PanelSnapshot, page: number): PanelView {
 	const { lang } = snapshot;
-	const lines = [t(lang, "panel.pkgTitle")];
-	if (snapshot.packages.length === 0) lines.push(t(lang, "pkg.none"));
-	else for (const source of snapshot.packages) lines.push(`- ${source}`);
-	const buttons: PanelButton[] = [actButton(t(lang, "panel.pkgAdd"), "pkg:add")];
-	for (const [index, source] of snapshot.packages.entries()) {
-		buttons.push(runButton(`🗑 ${shortSource(source)}`, "pkg", "rm", String(index), `/packages rm ${index}`));
-	}
-	return { text: lines.join("\n"), rows: withBack("pkg", lang, buttons) };
+	const slice = pageSlice(snapshot.packages, page);
+	const lines = slice.items.map((source) => `- ${preview(source)}`);
+	const buttons = slice.items.map((source) => runButton(`🗑 ${shortSource(source)}`, "pkg", "rm", panelKey([source])));
+	return {
+		text: [pageTitle(t(lang, "panel.pkgTitle"), slice), ...(lines.length ? lines : [t(lang, "pkg.none")])].join("\n"),
+		rows: pagedRows(lang, "pkg", "sys", slice, grid(buttons), [actButton(t(lang, "panel.pkgAdd"), "pkg:add")]),
+	};
 }
 
-function memoryPage(snapshot: PanelSnapshot): PanelView {
+function memoryPage(snapshot: PanelSnapshot, page: number): PanelView {
 	const { lang } = snapshot;
-	const lines = [t(lang, "panel.memTitle", { n: snapshot.stored.length, pending: snapshot.pending })];
-	if (snapshot.pendingLines !== "") lines.push(snapshot.pendingLines);
-	const buttons: PanelButton[] = [];
+	const slice = pageSlice(snapshot.stored, page);
+	const lines = [
+		pageTitle(t(lang, "panel.memTitle", { n: snapshot.stored.length, pending: snapshot.pending }), slice),
+	];
+	if (!slice.items.length) lines.push(t(lang, "memory.empty"));
+	for (const entry of slice.items) lines.push(`${entry.number}. [${entry.target}] ${preview(entry.text, 160)}`);
+	const fixed: PanelButton[] = [];
 	if (snapshot.pending > 0) {
-		buttons.push(
-			runButton(t(lang, "panel.approveAll"), "mem", "ok", "all", "/memory approve all"),
-			runButton(t(lang, "panel.rejectAll"), "mem", "no", "all", "/memory reject all"),
+		lines.push(
+			snapshot.pendingLines.length <= 2500
+				? snapshot.pendingLines
+				: t(lang, "panel.pendingMore", { n: snapshot.pending }),
+		);
+		fixed.push(
+			runButton(t(lang, "panel.approveAll"), "mem", "ok", snapshot.pendingKey),
+			runButton(t(lang, "panel.rejectAll"), "mem", "no", snapshot.pendingKey),
 		);
 	}
-	for (const entry of snapshot.stored.slice(0, FORGET_BUTTONS)) {
-		buttons.push(
-			runButton(
-				t(lang, "panel.forget", { n: entry.number }),
-				"mem",
-				"fg",
-				String(entry.number),
-				`/memory forget ${entry.number}`,
-			),
-		);
-	}
-	return { text: lines.join("\n"), rows: withBack("mem", lang, buttons) };
+	const buttons = slice.items.map((entry) =>
+		runButton(t(lang, "panel.forget", { n: entry.number }), "mem", "fg", panelKey([entry.target, entry.text])),
+	);
+	return { text: lines.join("\n"), rows: pagedRows(lang, "mem", "set", slice, grid(buttons), fixed) };
 }
 
-function jobsPage(snapshot: PanelSnapshot): PanelView {
+function jobsPage(snapshot: PanelSnapshot, page: number): PanelView {
 	const { lang } = snapshot;
-	const text =
-		snapshot.jobs.length === 0
-			? t(lang, "jobs.empty")
-			: [t(lang, "panel.jobTitle"), formatJobs([...snapshot.jobs], lang)].join("\n");
-	const buttons: PanelButton[] = [];
-	for (const job of snapshot.jobs.slice(0, JOB_BUTTONS)) {
-		const short = job.id.slice(0, 8);
-		const verb = job.enabled ? "pause" : "resume";
-		buttons.push(
-			runButton(`${job.enabled ? "⏸" : "▶️"} ${job.name}`, "job", verb, short, `/jobs ${verb} ${short}`),
-			runButton(`🗑 ${job.name}`, "job", "rm", short, `/jobs rm ${short}`),
+	const slice = pageSlice(snapshot.jobs, page, 3);
+	const lines = [pageTitle(t(lang, "panel.jobTitle"), slice)];
+	if (!slice.items.length) lines.push(t(lang, "jobs.empty"));
+	const rows = slice.items.map((job) => {
+		const key = panelKey([job.id]);
+		const status = job.enabled ? (job.lastStatus ?? "pending") : "paused";
+		lines.push(
+			`${preview(job.id, 32)} · ${preview(job.name)} · ${preview(job.schedule, 64)} · ${new Date(job.nextRunAt).toLocaleString(lang)} · ${status}`,
 		);
-	}
-	return { text, rows: withBack("job", lang, buttons) };
+		return [
+			runButton(`${job.enabled ? "⏸" : "▶️"} ${preview(job.name, 48)}`, "job", job.enabled ? "pause" : "resume", key),
+			runButton(`🗑 ${preview(job.name, 48)}`, "job", "rm", key),
+		];
+	});
+	return { text: lines.join("\n"), rows: pagedRows(lang, "job", "set", slice, rows) };
 }
 
-/** Render one page. The `arg` slot carries a provider (and page) for the model pages. */
-export function renderPage(page: PanelPage, snapshot: PanelSnapshot, arg = ""): PanelView {
+/** Render a page; a model provider can be specified by name in typed commands. */
+export function renderPage(page: PanelPage, snapshot: PanelSnapshot, arg = "", modelProvider?: string): PanelView {
 	switch (page) {
 		case "set":
 			return settingsPage(snapshot);
-		case "mdl":
-			return arg === "" ? modelsPage(snapshot) : providerModelsPage(snapshot, ...parseMdlArg(arg, snapshot));
+		case "sys":
+			return systemPage(snapshot);
+		case "mdl": {
+			const [name, n] = arg.trim().split(/\s+/);
+			const provider = snapshot.modelsByProvider.find((candidate) => candidate.id === (modelProvider ?? name));
+			return provider
+				? providerModelsPage(snapshot, provider, Number(modelProvider === undefined ? n : arg))
+				: modelsPage(snapshot, Number(arg));
+		}
 		case "pvd":
-			return providersPage(snapshot);
+			return providersPage(snapshot, Number(arg));
 		case "ses":
 			return sessionsPage(snapshot);
 		case "pkg":
-			return packagesPage(snapshot);
+			return packagesPage(snapshot, Number(arg));
 		case "mem":
-			return memoryPage(snapshot);
+			return memoryPage(snapshot, Number(arg));
 		case "job":
-			return jobsPage(snapshot);
+			return jobsPage(snapshot, Number(arg));
 	}
 }
 
@@ -337,12 +372,5 @@ function shortSource(source: string): string {
 	const trimmed = source.replace(/\/+$/, "");
 	const slash = trimmed.lastIndexOf("/");
 	const name = slash >= 0 ? trimmed.slice(slash + 1) : trimmed;
-	return name.length > 20 ? `${name.slice(0, 19)}…` : name;
+	return preview(name, 22);
 }
-
-/** The text a channel without buttons shows for `/settings`. */
-export function panelFallback(lang: Lang, version: string): string {
-	return [t(lang, "panel.title", { version }), describe("settings", lang), describe("help", lang)].join("\n");
-}
-
-export { formatUptime };

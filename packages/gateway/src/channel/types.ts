@@ -1,4 +1,5 @@
 export type Lang = "en" | "zh";
+export type ReplyFormat = "rich" | "mdv2";
 
 /** One attachment the user sent with a message. */
 export interface Attachment {
@@ -68,6 +69,9 @@ export interface SentHandle {
 	id: string;
 }
 
+/** The platform definitely rejected the tool card; sending its final state cannot duplicate it. */
+export class ToolCallRejected extends Error {}
+
 /**
  * A reply rendered progressively by the platform itself, such as QQ's `stream_messages`.
  *
@@ -92,6 +96,8 @@ export interface Adapter {
 	start(onInbound: (message: Inbound) => void, onAction?: (action: ChannelAction) => void): Promise<void>;
 	/** Render, split and send `markdown`, falling back to plain text when rendering fails. */
 	sendMarkdown(chatId: string, markdown: string, replyTo?: string): Promise<SentHandle[]>;
+	/** Replace one ordinary Markdown answer. The adapter owns MarkdownV2 conversion. */
+	editMarkdown?(chatId: string, handle: SentHandle, markdown: string): Promise<boolean>;
 	/**
 	 * Send one message as rich Markdown: real lists and tables, `<details>` folds, and buttons.
 	 * A channel without `caps.rich` sends it through `sendMarkdown` and ignores the buttons.
@@ -99,6 +105,9 @@ export interface Adapter {
 	sendRich(chatId: string, markdown: string, replyTo?: string, keyboard?: Keyboard): Promise<SentHandle>;
 	/** Replace a message with rich Markdown. False when the channel cannot edit or it does not fit. */
 	editRich(chatId: string, handle: SentHandle, markdown: string, keyboard?: Keyboard): Promise<boolean>;
+	/** A pair of optional operations for a tool card. Both fields are literal, unescaped text. */
+	sendToolCall?(chatId: string, name: string, details: string, replyTo?: string): Promise<SentHandle>;
+	editToolCall?(chatId: string, handle: SentHandle, name: string, details: string): Promise<boolean>;
 	/** Replace only the buttons under a message; a no-op where `caps.edit` is false. */
 	editMarkup(chatId: string, handle: SentHandle, keyboard: Keyboard): Promise<void>;
 	/** Replace the text of a sent message. Throws when `caps.edit` is false. */

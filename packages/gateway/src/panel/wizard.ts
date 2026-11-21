@@ -7,6 +7,8 @@
 
 import type { Lang } from "../channel/types.ts";
 import { t } from "../i18n/index.ts";
+import { actButton } from "./encode.ts";
+import { apiKindRows, type PanelView } from "./model.ts";
 import { API_KINDS, type ApiKind, type CustomModel, modelFromId } from "./models-json.ts";
 
 /** Where the wizard is. */
@@ -79,7 +81,7 @@ export function applyText(draft: ProviderDraft, text: string, taken: (id: string
 	}
 }
 
-/** Apply a button press: the API kind, or save/cancel on the confirm page. */
+/** Apply the validated API kind selected by the caller, only on its own step. */
 export function applyChoice(draft: ProviderDraft, verb: string, arg: string): ProviderDraft | undefined {
 	if (verb === "api" && draft.step === "api") {
 		if (!(API_KINDS as readonly string[]).includes(arg)) return undefined;
@@ -125,4 +127,20 @@ export function question(draft: ProviderDraft, lang: Lang): string {
 		case "confirm":
 			return t(lang, "wizard.confirm");
 	}
+}
+
+/** Render the question and only the actions valid at this step. Never render the credential or probe body. */
+export function page(draft: ProviderDraft, lang: Lang, flowId: string, notice?: string): PanelView {
+	const lines = [question(draft, lang)];
+	const rows = draft.step === "api" ? apiKindRows(flowId) : [];
+	const actions = [actButton(t(lang, "wizard.cancel"), `set:cancel:${flowId}`)];
+	if (draft.step === "confirm") {
+		lines.push(`provider: ${draft.id}`, `baseUrl: ${draft.baseUrl}`, `api: ${draft.api}`, "apiKey: ••••");
+		if (draft.probeError === undefined) lines.push(t(lang, "wizard.found", { n: draft.models.length }));
+		else lines.push(t(lang, "wizard.probeFailed", { error: draft.probeError }), t(lang, "wizard.probeFailedHint"));
+		actions.unshift(actButton(t(lang, "wizard.save"), `pvd:save:${flowId}`));
+	}
+	if (notice && notice !== lines[0]) lines.unshift(notice);
+	rows.push(actions);
+	return { text: lines.join("\n"), rows };
 }

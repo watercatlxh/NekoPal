@@ -80,7 +80,11 @@ async function main(): Promise<number> {
 		return 1;
 	}
 
-	const modelRuntime = await ModelRuntime.create({});
+	const modelRuntime = await ModelRuntime.create({
+		builtinOAuthOnly: true,
+		allowModelNetwork: true,
+		modelRefreshTimeoutMs: 8_000,
+	});
 	const workspace = expandHome(settings.workspace ?? HOME);
 	mkdirSync(workspace, { recursive: true });
 

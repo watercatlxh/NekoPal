@@ -26,6 +26,12 @@ afterEach(() => {
 });
 
 describe("environment API keys", () => {
+	it("discovers SDK xAI keys but not Google Antigravity API keys", () => {
+		const env = { XAI_API_KEY: "xai-test", GEMINI_API_KEY: "google-test", GOOGLE_API_KEY: "google-test" };
+		expect(getEnvApiKey("xai", env)).toBe("xai-test");
+		expect(getEnvApiKey("google", env)).toBeUndefined();
+	});
+
 	it("reports ANTHROPIC_AUTH_TOKEN but preserves OAuth token API key lookup", () => {
 		process.env.ANTHROPIC_AUTH_TOKEN = "auth-token";
 		process.env.ANTHROPIC_OAUTH_TOKEN = "oauth-token";

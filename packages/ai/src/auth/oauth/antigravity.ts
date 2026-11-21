@@ -7,7 +7,6 @@
  * request building can pass it as the body's `project` field.
  */
 
-import { getProviderEnvValue } from "../../utils/provider-env.ts";
 import type { OAuthAuth, OAuthCredential, ProviderAuthInteraction } from "../types.ts";
 import { startOAuthCallbackServer, waitForCallbackOrManualInput } from "./callback-server.ts";
 import { generatePKCE } from "./pkce.ts";
@@ -22,7 +21,7 @@ const CLIENT_SECRET = decode("R09DU1BYLUs1OEZXUjQ4NkxkTEoxbUxCOHNYQzR6NnFEQWY=")
 const AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const USERINFO_URL = "https://www.googleapis.com/oauth2/v1/userinfo?alt=json";
-const CALLBACK_HOST = getProviderEnvValue("NEKOPAL_OAUTH_CALLBACK_HOST") || "127.0.0.1";
+const CALLBACK_HOST = "127.0.0.1";
 const CALLBACK_PORT = 51121;
 const CALLBACK_PATH = "/oauth-callback";
 const REDIRECT_URI = `http://localhost:${CALLBACK_PORT}${CALLBACK_PATH}`;
@@ -55,58 +54,72 @@ function antigravityHeaders(): Record<string, string> {
 	};
 }
 
-async function postJson(
+function isObject(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function nonBlank(value: unknown): value is string {
+	return typeof value === "string" && value.trim().length > 0;
+}
+
+/** Never forward credential-bearing requests or include untrusted response text in errors. */
+async function requestJson(
+	label: string,
 	url: string,
-	headers: Record<string, string>,
-	body: Record<string, unknown>,
+	init: RequestInit,
 	signal: AbortSignal,
-): Promise<unknown> {
+): Promise<Record<string, unknown>> {
 	const response = await fetch(url, {
-		method: "POST",
-		headers,
-		body: JSON.stringify(body),
+		...init,
+		redirect: "error",
 		signal: AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]),
+	}).catch(() => {
+		throw new Error(signal.aborted ? "Login cancelled" : `${label} request failed`);
 	});
-	if (!response.ok) throw new Error(`${url} returned ${response.status}: ${await response.text()}`);
-	return await response.json();
-}
-
-interface TokenResponse {
-	access_token: string;
-	refresh_token?: string;
-	expires_in: number;
-}
-
-async function exchangeCode(
-	code: string,
-	verifier: string,
-	redirectUri: string,
-	signal: AbortSignal,
-): Promise<TokenResponse> {
-	const response = await fetch(TOKEN_URL, {
-		method: "POST",
-		headers: { "Content-Type": "application/x-www-form-urlencoded" },
-		body: new URLSearchParams({
-			grant_type: "authorization_code",
-			client_id: CLIENT_ID,
-			client_secret: CLIENT_SECRET,
-			code,
-			code_verifier: verifier,
-			redirect_uri: redirectUri,
-		}),
-		signal: AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]),
-	});
-	if (!response.ok) throw new Error(`token exchange failed (${response.status}): ${await response.text()}`);
-	const data = (await response.json()) as TokenResponse;
-	if (!data.refresh_token) throw new Error("No refresh token received; revoke access and sign in again");
+	if (!response.ok) throw new Error(`${label} failed (HTTP ${response.status})`);
+	const data: unknown = await response.json().catch(() => undefined);
+	if (!isObject(data)) throw new Error(`${label} returned invalid JSON`);
 	return data;
 }
 
-interface LoadCodeAssistResponse {
-	currentTier?: { id?: string } | null;
-	cloudaicompanionProject?: string;
-	allowedTiers?: Array<{ id?: string }>;
-	ineligibleTiers?: Array<{ tierId?: string; reasonMessage?: string; validationUrl?: string }>;
+async function requestToken(label: string, params: Record<string, string>, signal: AbortSignal) {
+	const data = await requestJson(
+		label,
+		TOKEN_URL,
+		{
+			method: "POST",
+			headers: { "Content-Type": "application/x-www-form-urlencoded" },
+			body: new URLSearchParams({ ...params, client_id: CLIENT_ID, client_secret: CLIENT_SECRET }),
+		},
+		signal,
+	);
+	if (
+		!nonBlank(data.access_token) ||
+		typeof data.expires_in !== "number" ||
+		data.expires_in <= 0 ||
+		!Number.isFinite(data.expires_in * 1000) ||
+		(data.refresh_token !== undefined && !nonBlank(data.refresh_token))
+	) {
+		throw new Error(`${label} returned invalid token data`);
+	}
+	return {
+		access: data.access_token,
+		refresh: data.refresh_token,
+		expires: Date.now() + data.expires_in * 1000 - EXPIRY_SKEW_MS,
+	};
+}
+
+function hasFreeTier(tiers: unknown, key: string): boolean {
+	if (tiers === undefined || tiers === null) return false;
+	if (!Array.isArray(tiers) || !tiers.every(isObject)) throw new Error("loadCodeAssist returned invalid tiers");
+	return tiers.some((tier) => tier[key] === FREE_TIER_ID);
+}
+
+function readProject(data: Record<string, unknown>): string | undefined {
+	const project = data.cloudaicompanionProject;
+	if (project === undefined || project === null) return undefined;
+	if (!nonBlank(project)) throw new Error("loadCodeAssist returned an invalid project");
+	return project;
 }
 
 /** Resolve the Cloud Code Assist project: onboarding the free tier when the account has none. */
@@ -117,46 +130,38 @@ async function discoverProject(accessToken: string, signal: AbortSignal): Promis
 		...antigravityHeaders(),
 	};
 	const metadata = { ideType: "ANTIGRAVITY" };
+	const post = (label: string, url: string, body: Record<string, unknown>) =>
+		requestJson(label, url, { method: "POST", headers, body: JSON.stringify(body) }, signal);
 	const load = (project?: string) =>
-		postJson(
-			LOAD_CODE_ASSIST_URL,
-			headers,
-			{ ...(project ? { cloudaicompanionProject: project } : {}), metadata },
-			signal,
-		) as Promise<LoadCodeAssistResponse>;
+		post("loadCodeAssist", LOAD_CODE_ASSIST_URL, {
+			...(project ? { cloudaicompanionProject: project } : {}),
+			metadata,
+		});
 
 	const initial = await load();
-	const ineligible = initial.ineligibleTiers?.find((tier) => tier.tierId === FREE_TIER_ID);
-	if (!initial.allowedTiers?.some((tier) => tier.id === FREE_TIER_ID) && ineligible?.reasonMessage) {
-		throw new Error(
-			`Antigravity free tier unavailable: ${ineligible.reasonMessage}${ineligible.validationUrl ? `\n${ineligible.validationUrl}` : ""}`,
-		);
+	const initialProject = readProject(initial);
+	if (!hasFreeTier(initial.allowedTiers, "id") && hasFreeTier(initial.ineligibleTiers, "tierId")) {
+		throw new Error("Antigravity free tier unavailable for this account");
 	}
 	if (initial.currentTier === undefined || initial.currentTier === null) {
 		// Provision the free tier and poll the long-running operation.
 		const deadline = Date.now() + ONBOARD_TIMEOUT_MS;
-		const operation = (await postJson(ONBOARD_USER_URL, headers, { tierId: FREE_TIER_ID, metadata }, signal)) as {
-			name?: string;
-			done?: boolean;
-			error?: { message?: string };
-		};
+		let operation = await post("onboardUser", ONBOARD_USER_URL, { tierId: FREE_TIER_ID, metadata });
+		const name = operation.name;
 		while (operation.done !== true) {
+			if (operation.error) throw new Error("Antigravity onboarding failed");
+			if (typeof name !== "string" || !/^operations\/(?:[\w-][\w.-]*\/)*[\w-][\w.-]*$/.test(name)) {
+				throw new Error("onboardUser returned an invalid operation name");
+			}
 			if (Date.now() > deadline) throw new Error("onboardUser timed out");
 			await new Promise((resolve) => setTimeout(resolve, ONBOARD_POLL_INTERVAL_MS));
 			if (signal.aborted) throw new Error("login cancelled");
-			const polled = await fetch(`${OPERATIONS_URL}/${operation.name ?? ""}`, {
-				headers,
-				signal: AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]),
-			});
-			if (!polled.ok) throw new Error(`operation poll failed (${polled.status})`);
-			const body = (await polled.json()) as typeof operation;
-			operation.done = body.done;
-			operation.error = body.error;
+			operation = await requestJson("operation poll", `${OPERATIONS_URL}/${name}`, { headers }, signal);
 		}
-		if (operation.error) throw new Error(`onboardUser failed: ${operation.error.message}`);
+		if (operation.error) throw new Error("Antigravity onboarding failed");
 	}
-	const refreshed = await load(initial.cloudaicompanionProject);
-	const projectId = refreshed.cloudaicompanionProject ?? initial.cloudaicompanionProject;
+	const refreshed = await load(initialProject);
+	const projectId = readProject(refreshed) ?? initialProject;
 	if (!projectId) throw new Error("loadCodeAssist did not return a cloudaicompanionProject");
 	return projectId;
 }
@@ -164,54 +169,71 @@ async function discoverProject(accessToken: string, signal: AbortSignal): Promis
 /** Ask the userinfo endpoint for the account's email, so status lines can name the account. */
 async function accountEmail(accessToken: string, signal: AbortSignal): Promise<string | undefined> {
 	try {
-		const response = await fetch(USERINFO_URL, {
-			headers: { Authorization: `Bearer ${accessToken}` },
-			signal: AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]),
-		});
-		if (!response.ok) return undefined;
-		const data = (await response.json()) as { email?: string };
-		return data.email;
+		const data = await requestJson(
+			"account lookup",
+			USERINFO_URL,
+			{ headers: { Authorization: `Bearer ${accessToken}` } },
+			signal,
+		);
+		return nonBlank(data.email) ? data.email : undefined;
 	} catch {
+		if (signal.aborted) throw new Error("Login cancelled");
 		return undefined;
 	}
 }
 
-/**
- * Read `code` and `state` out of whatever the user pasted: a full redirect URL, a query string,
- * a `code#state` pair, or a bare code. Ports omp's Anthropic parser's acceptance table.
- */
-function parseAuthorizationInput(input: string): { code?: string; state?: string } {
+/** Only an explicitly pasted bare code can omit state. Do not downgrade malformed redirects to bare codes. */
+function parseAuthorizationInput(input: string, expectedState: string): string {
 	const value = input.trim();
-	if (!value) return {};
-	try {
-		const url = new URL(value);
-		return {
-			code: url.searchParams.get("code") ?? undefined,
-			state: url.searchParams.get("state") ?? undefined,
-		};
-	} catch {
-		// Not a URL: fall through to the pair and bare forms.
+	const isUrl = /^[a-z][a-z\d+.-]*:/i.test(value);
+	let code: string | null;
+	let state: string | null;
+	if (isUrl || /[?=&]/.test(value)) {
+		let params: URLSearchParams;
+		if (isUrl) {
+			let url: URL;
+			try {
+				url = new URL(value);
+			} catch {
+				throw new Error("Invalid OAuth redirect URL");
+			}
+			if (url.origin + url.pathname !== REDIRECT_URI || url.username || url.password || url.hash) {
+				throw new Error("Invalid OAuth redirect URL");
+			}
+			params = url.searchParams;
+		} else {
+			params = new URLSearchParams(value);
+		}
+		if (params.has("error")) throw new Error("Google authorization failed");
+		if (params.getAll("state").length !== 1 || params.getAll("code").length > 1) {
+			throw new Error("Invalid OAuth code or state");
+		}
+		code = params.get("code");
+		state = params.get("state");
+	} else if (value.includes("#")) {
+		const separator = value.indexOf("#");
+		code = value.slice(0, separator);
+		state = value.slice(separator + 1);
+	} else {
+		if (!value || /\s/.test(value) || value.startsWith("/")) throw new Error("Invalid authorization code");
+		return value;
 	}
-	if (value.includes("#")) {
-		const [code, state] = value.split("#", 2);
-		return { code: code.trim(), state: state.trim() };
-	}
-	if (value.includes("code=")) {
-		const params = new URLSearchParams(value);
-		return { code: params.get("code") ?? undefined, state: params.get("state") ?? undefined };
-	}
-	return { code: value };
+	if (state !== expectedState) throw new Error("OAuth state mismatch");
+	if (!nonBlank(code)) throw new Error("Missing authorization code");
+	return code;
 }
 
 async function loginAntigravity(interaction: ProviderAuthInteraction): Promise<OAuthCredential> {
+	if (interaction.signal.aborted) throw new Error("Login cancelled");
 	const { verifier, challenge } = await generatePKCE();
+	const state = crypto.randomUUID();
 	const callback = await startOAuthCallbackServer({
 		providerName: "Google Antigravity",
 		host: CALLBACK_HOST,
 		port: CALLBACK_PORT,
 		path: CALLBACK_PATH,
 		redirectHost: "localhost",
-		state: verifier,
+		state,
 		complete: async (code) => code,
 		signal: interaction.signal,
 	}).catch(() => undefined);
@@ -227,7 +249,7 @@ async function loginAntigravity(interaction: ProviderAuthInteraction): Promise<O
 			prompt: "consent",
 			code_challenge: challenge,
 			code_challenge_method: "S256",
-			state: verifier,
+			state,
 		});
 		interaction.notify({
 			type: "auth_url",
@@ -239,28 +261,27 @@ async function loginAntigravity(interaction: ProviderAuthInteraction): Promise<O
 		const result = await waitForCallbackOrManualInput(interaction, callback, {
 			message: "Complete the sign-in in your browser, or paste the authorization code here:",
 			placeholder: redirectUri,
+		}).catch(() => {
+			throw new Error(interaction.signal.aborted ? "Login cancelled" : "Google authorization did not complete");
 		});
-		let code: string | undefined;
-		if (result.type === "callback") {
-			code = result.value;
-		} else {
-			// Google redirects with `?code=…&state=…`; a bare code or `code#state` also works.
-			const parsed = parseAuthorizationInput(result.input);
-			if (parsed.state !== undefined && parsed.state !== verifier) throw new Error("OAuth state mismatch");
-			code = parsed.code;
-		}
-		if (!code) throw new Error("Missing authorization code");
+		const code = result.type === "callback" ? result.value : parseAuthorizationInput(result.input, state);
 
 		interaction.notify({ type: "progress", message: "Exchanging the authorization code..." });
-		const tokens = await exchangeCode(code, verifier, redirectUri, interaction.signal);
+		const tokens = await requestToken(
+			"token exchange",
+			{ grant_type: "authorization_code", code, code_verifier: verifier, redirect_uri: redirectUri },
+			interaction.signal,
+		);
+		if (!tokens.refresh) throw new Error("No refresh token received; revoke access and sign in again");
 		interaction.notify({ type: "progress", message: "Provisioning the Antigravity free tier..." });
-		const projectId = await discoverProject(tokens.access_token, interaction.signal);
-		const email = await accountEmail(tokens.access_token, interaction.signal);
+		const projectId = await discoverProject(tokens.access, interaction.signal);
+		const email = await accountEmail(tokens.access, interaction.signal);
+		if (interaction.signal.aborted) throw new Error("Login cancelled");
 		return {
 			type: "oauth",
-			refresh: tokens.refresh_token ?? "",
-			access: tokens.access_token,
-			expires: Date.now() + tokens.expires_in * 1000 - EXPIRY_SKEW_MS,
+			refresh: tokens.refresh,
+			access: tokens.access,
+			expires: tokens.expires,
 			projectId,
 			...(email ? { email } : {}),
 		};
@@ -270,26 +291,16 @@ async function loginAntigravity(interaction: ProviderAuthInteraction): Promise<O
 }
 
 async function refreshAntigravity(credential: OAuthCredential, signal: AbortSignal): Promise<OAuthCredential> {
-	const response = await fetch(TOKEN_URL, {
-		method: "POST",
-		headers: { "Content-Type": "application/x-www-form-urlencoded" },
-		body: new URLSearchParams({
-			grant_type: "refresh_token",
-			client_id: CLIENT_ID,
-			client_secret: CLIENT_SECRET,
-			refresh_token: credential.refresh,
-		}),
-		signal: AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]),
-	});
-	if (!response.ok) throw new Error(`token refresh failed (${response.status}): ${await response.text()}`);
-	const data = (await response.json()) as { access_token: string; refresh_token?: string; expires_in: number };
+	const data = await requestToken(
+		"token refresh",
+		{ grant_type: "refresh_token", refresh_token: credential.refresh },
+		signal,
+	);
 	return {
-		type: "oauth",
-		refresh: data.refresh_token ?? credential.refresh,
-		access: data.access_token,
-		expires: Date.now() + data.expires_in * 1000 - EXPIRY_SKEW_MS,
-		projectId: credential.projectId,
-		...(credential.email ? { email: credential.email } : {}),
+		...credential,
+		access: data.access,
+		refresh: data.refresh ?? credential.refresh,
+		expires: data.expires,
 	};
 }
 
@@ -300,5 +311,9 @@ export const antigravityOAuth: OAuthAuth = {
 
 	login: loginAntigravity,
 	refresh: (credential, signal) => refreshAntigravity(credential, signal),
-	toAuth: async (credential) => ({ apiKey: credential.access }),
+	toAuth: async (credential) => {
+		if (!nonBlank(credential.projectId)) throw new Error("Missing Antigravity project; sign in again");
+		if (!nonBlank(credential.access)) throw new Error("Missing Antigravity access token; sign in again");
+		return { apiKey: JSON.stringify({ token: credential.access, projectId: credential.projectId }) };
+	},
 };

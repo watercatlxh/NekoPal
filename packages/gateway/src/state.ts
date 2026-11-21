@@ -1,10 +1,11 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import type { Lang } from "./channel/types.ts";
+import type { Lang, ReplyFormat } from "./channel/types.ts";
 import { logError } from "./log.ts";
 import { STATE_PATH } from "./paths.ts";
 
 export interface ChatState {
 	lang?: Lang;
+	telegramReplyFormat?: ReplyFormat;
 }
 
 export interface State {

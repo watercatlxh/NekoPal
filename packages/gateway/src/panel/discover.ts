@@ -52,18 +52,19 @@ function trimBase(baseUrl: string): string {
  * resolved here so the probe authenticates exactly as the provider will at request time.
  */
 export async function discoverModels(baseUrl: string, apiKey: string, signal?: AbortSignal): Promise<Discovery> {
-	const key = resolveConfigValue(apiKey);
-	if (key === undefined || key === "") return { models: [], error: "api key did not resolve" };
 	const timeout = AbortSignal.timeout(DISCOVERY_TIMEOUT_MS);
 	const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
 	let response: Response;
 	try {
+		const key = resolveConfigValue(apiKey);
+		if (!key) return { models: [], error: "api key did not resolve" };
 		response = await fetch(`${trimBase(baseUrl)}/models`, {
 			headers: { authorization: `Bearer ${key}`, accept: "application/json" },
 			signal: combined,
 		});
-	} catch (error) {
-		return { models: [], error: error instanceof Error ? error.message : String(error) };
+	} catch {
+		// Resolver and transport exceptions may include a command, URL or Authorization value.
+		return { models: [], error: "request failed" };
 	}
 	if (!response.ok) return { models: [], error: `HTTP ${response.status}` };
 	let body: unknown;

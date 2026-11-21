@@ -1,16 +1,13 @@
 /**
- * The panel's entry point: a snapshot of the chat, the page renderer, and the command a press maps to.
- *
- * The router reuses the existing command table instead of re-implementing each action, so a button
- * press and a typed command can never diverge.
+ * The panel's entry point: snapshot current state and map presses to validated commands.
  */
 
 import { DefaultPackageManager } from "@earendil-works/pi-coding-agent";
 import type { CommandContext } from "../commands/index.ts";
 import { formatPending, storedEntries } from "../commands/memory.ts";
-import { decode, type PanelPage } from "./encode.ts";
+import { type PanelPage, type PanelPress, pendingKey } from "./encode.ts";
 import { type PanelSnapshot, type PanelView, type ProviderView, renderPage } from "./model.ts";
-import { listCustomProviders, modelsJsonPath } from "./models-json.ts";
+import { listCustomProviders } from "./models-json.ts";
 
 /** The providers a chat can sign in to; every one of them signs in with OAuth. */
 export const LOGIN_PROVIDERS = {
@@ -35,13 +32,19 @@ export function snapshot(context: CommandContext): PanelSnapshot {
 	const pendingEntries = context.pending.list();
 	// Models grouped per configured provider, untruncated: the model page pages through them.
 	const modelsByProvider = new Map<string, string[]>();
-	for (const candidate of runtime.getModels()) {
-		if (!runtime.hasConfiguredAuth(candidate.provider)) continue;
+	for (const candidate of runtime.getAvailableSnapshot()) {
 		const list = modelsByProvider.get(candidate.provider) ?? [];
 		list.push(candidate.id);
 		modelsByProvider.set(candidate.provider, list);
 	}
-	const custom = new Set(listCustomProviders(context.agentDir));
+	let custom: Set<string>;
+	let configReadFailed = false;
+	try {
+		custom = new Set(listCustomProviders(context.agentDir));
+	} catch {
+		custom = new Set();
+		configReadFailed = true;
+	}
 	const manager = new DefaultPackageManager({
 		cwd: chat.workspace,
 		agentDir: context.agentDir,
@@ -49,6 +52,7 @@ export function snapshot(context: CommandContext): PanelSnapshot {
 	});
 	return {
 		lang: chat.lang,
+		telegramReplyFormat: chat.adapter.name === "telegram" ? chat.telegramReplyFormat : undefined,
 		version: context.version,
 		model: model ? `${model.provider}/${model.id}` : "none",
 		thinking: chat.session.thinkingLevel,
@@ -74,9 +78,11 @@ export function snapshot(context: CommandContext): PanelSnapshot {
 		stored,
 		pending: pendingEntries.length,
 		pendingLines: formatPending(pendingEntries),
+		pendingKey: pendingKey(pendingEntries.map((entry) => entry.id)),
 		jobs: context.jobs.load(),
 		modelsByProvider: [...modelsByProvider.entries()].map(([id, models]) => ({ id, models })),
-		providers: providerViews(context, runtime, custom),
+		providers: providerViews(runtime, custom),
+		configReadFailed,
 		packages: manager.listConfiguredPackages().map((entry) => entry.source),
 		channels: context.enabledChannels,
 		qqQuota: context.qqQuota?.(),
@@ -85,7 +91,6 @@ export function snapshot(context: CommandContext): PanelSnapshot {
 
 /** Every provider the runtime knows, with how it is configured. */
 function providerViews(
-	context: CommandContext,
 	runtime: CommandContext["chat"]["session"]["modelRuntime"],
 	custom: ReadonlySet<string>,
 ): ProviderView[] {
@@ -99,59 +104,21 @@ function providerViews(
 			custom: custom.has(provider.id),
 		});
 	}
-	void context;
+	for (const id of custom) {
+		if (!views.some((provider) => provider.id === id)) views.push({ id, configured: false, custom: true });
+	}
 	return views;
 }
 
 /** Render one page from a fresh snapshot; `arg` narrows a page (a provider, a page number). */
-export function view(context: CommandContext, page: PanelPage, arg = ""): PanelView {
-	return renderPage(page, snapshot(context), arg);
+export function view(context: CommandContext, page: PanelPage, arg = "", modelProvider?: string): PanelView {
+	return renderPage(page, snapshot(context), arg, modelProvider);
 }
 
-/** The command a press maps to, or undefined when it only navigates or opens a wizard. */
-export function commandFor(data: string): string | undefined {
-	const press = decode(data);
-	if (!press || press.verb === "nav") return undefined;
-	const { page, verb, arg } = press;
-	switch (page) {
-		case "set":
-			if (verb === "lang") return `/settings lang ${arg}`;
-			return undefined;
-		case "mdl":
-			// The arg is `provider:index`, resolved to the model id the page listed there,
-			// so a Telegram callback never has to fit a long model id in 64 bytes.
-			if (verb === "set") return `/model mdl:${arg}`;
-			return undefined;
-		case "ses":
-			if (verb === "new") return "/new";
-			if (verb === "list") return "/sessions";
-			if (verb === "stop") return "/stop";
-			if (verb === "resume") return `/resume ${arg}`;
-			if (verb === "page") return `/settings page ${arg}`;
-			return undefined;
-		case "pkg":
-			if (verb === "rm") return `/packages rm ${arg}`;
-			return undefined;
-		case "mem":
-			if (verb === "ok") return "/memory approve all";
-			if (verb === "no") return "/memory reject all";
-			if (verb === "fg") return `/memory forget ${arg}`;
-			return undefined;
-		case "job":
-			if (verb === "pause" || verb === "resume" || verb === "rm") return `/jobs ${verb} ${arg}`;
-			return undefined;
-		case "pvd":
-			if (verb === "rm") return `/settings pvd rm ${arg}`;
-			return undefined;
-	}
-}
-
-/** The page a press shows next: its own page, so a command's result stays in view. */
-export function pageFor(data: string): PanelPage | undefined {
-	return decode(data)?.page;
-}
-
-/** `models.json` for the chat's data directory, so the wizard and the daemon agree on one path. */
-export function modelsPath(context: CommandContext): string {
-	return modelsJsonPath(context.agentDir);
+/** Simple actions with no collection identity can reuse the typed command table. */
+export function commandFor({ page, verb, arg }: PanelPress): string | undefined {
+	if (page === "sys" && verb === "lang" && (arg === "en" || arg === "zh")) return `/settings lang ${arg}`;
+	if (page === "sys" && verb === "fmt" && (arg === "rich" || arg === "mdv2")) return `/settings format ${arg}`;
+	if (page === "ses" && arg === "" && (verb === "new" || verb === "stop")) return `/${verb}`;
+	return undefined;
 }
