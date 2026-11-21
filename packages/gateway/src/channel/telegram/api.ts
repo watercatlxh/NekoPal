@@ -34,9 +34,19 @@ export interface TelegramMessage {
 	audio?: { file_id: string; file_name?: string; mime_type?: string; file_size?: number };
 }
 
+export interface TelegramCallbackQuery {
+	id: string;
+	from: { id: number; language_code?: string };
+	/** The message the pressed button sits under; absent for an inline-mode button. */
+	message?: TelegramMessage;
+	chat_instance?: string;
+	data?: string;
+}
+
 export interface TelegramUpdate {
 	update_id: number;
 	message?: TelegramMessage;
+	callback_query?: TelegramCallbackQuery;
 }
 
 export interface TelegramFile {
@@ -81,7 +91,7 @@ export class TelegramApi {
 	getUpdates(offset: number, timeoutSeconds = 50): Promise<TelegramUpdate[]> {
 		return this.call<TelegramUpdate[]>(
 			"getUpdates",
-			{ offset, timeout: timeoutSeconds, allowed_updates: ["message"] },
+			{ offset, timeout: timeoutSeconds, allowed_updates: ["message", "callback_query"] },
 			(timeoutSeconds + 20) * 1000,
 		);
 	}

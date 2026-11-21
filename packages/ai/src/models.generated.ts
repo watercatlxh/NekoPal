@@ -2,17 +2,20 @@
 // Do not edit manually - run 'npm run generate-models' to update
 
 import { ANTHROPIC_CLASSIFIER_MODELS, ANTHROPIC_IMAGE_MODELS, ANTHROPIC_MODELS } from "./providers/anthropic.models.ts";
+import { GOOGLE_CLASSIFIER_MODELS, GOOGLE_IMAGE_MODELS, GOOGLE_MODELS } from "./providers/google.models.ts";
 import { OPENAI_CLASSIFIER_MODELS, OPENAI_IMAGE_MODELS, OPENAI_MODELS } from "./providers/openai.models.ts";
 import { OPENAI_CODEX_CLASSIFIER_MODELS, OPENAI_CODEX_IMAGE_MODELS, OPENAI_CODEX_MODELS } from "./providers/openai-codex.models.ts";
 import { XAI_CLASSIFIER_MODELS, XAI_IMAGE_MODELS, XAI_MODELS } from "./providers/xai.models.ts";
 
 export const MODELS: {
 	readonly "anthropic": typeof ANTHROPIC_MODELS;
+	readonly "google": typeof GOOGLE_MODELS;
 	readonly "openai": typeof OPENAI_MODELS;
 	readonly "openai-codex": typeof OPENAI_CODEX_MODELS;
 	readonly "xai": typeof XAI_MODELS;
 } = {
 	"anthropic": ANTHROPIC_MODELS,
+	"google": GOOGLE_MODELS,
 	"openai": OPENAI_MODELS,
 	"openai-codex": OPENAI_CODEX_MODELS,
 	"xai": XAI_MODELS,
@@ -20,11 +23,13 @@ export const MODELS: {
 
 export const IMAGE_MODELS: {
 	readonly "anthropic": typeof ANTHROPIC_IMAGE_MODELS;
+	readonly "google": typeof GOOGLE_IMAGE_MODELS;
 	readonly "openai": typeof OPENAI_IMAGE_MODELS;
 	readonly "openai-codex": typeof OPENAI_CODEX_IMAGE_MODELS;
 	readonly "xai": typeof XAI_IMAGE_MODELS;
 } = {
 	"anthropic": ANTHROPIC_IMAGE_MODELS,
+	"google": GOOGLE_IMAGE_MODELS,
 	"openai": OPENAI_IMAGE_MODELS,
 	"openai-codex": OPENAI_CODEX_IMAGE_MODELS,
 	"xai": XAI_IMAGE_MODELS,
@@ -32,11 +37,13 @@ export const IMAGE_MODELS: {
 
 export const CLASSIFIER_MODELS: {
 	readonly "anthropic": typeof ANTHROPIC_CLASSIFIER_MODELS;
+	readonly "google": typeof GOOGLE_CLASSIFIER_MODELS;
 	readonly "openai": typeof OPENAI_CLASSIFIER_MODELS;
 	readonly "openai-codex": typeof OPENAI_CODEX_CLASSIFIER_MODELS;
 	readonly "xai": typeof XAI_CLASSIFIER_MODELS;
 } = {
 	"anthropic": ANTHROPIC_CLASSIFIER_MODELS,
+	"google": GOOGLE_CLASSIFIER_MODELS,
 	"openai": OPENAI_CLASSIFIER_MODELS,
 	"openai-codex": OPENAI_CODEX_CLASSIFIER_MODELS,
 	"xai": XAI_CLASSIFIER_MODELS,

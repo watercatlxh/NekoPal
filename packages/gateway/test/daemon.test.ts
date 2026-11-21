@@ -9,7 +9,7 @@ import { Daemon } from "../src/daemon.ts";
 import { StateStore } from "../src/state.ts";
 import { createHarness } from "./support/harness.ts";
 
-const caps: Caps = { edit: true, stream: false, maxChars: 4_000 };
+const caps: Caps = { edit: true, stream: false, rich: true, maxChars: 4_000 };
 
 class FakeAdapter implements Adapter {
 	readonly name = "telegram" as const;
@@ -28,7 +28,15 @@ class FakeAdapter implements Adapter {
 		this.sent.push(markdown);
 		return [{ id: "1" }];
 	}
+	async sendRich(_chatId: string, markdown: string): Promise<SentHandle> {
+		this.sent.push(markdown);
+		return { id: "1" };
+	}
 	async editText(): Promise<void> {}
+	async editRich(): Promise<boolean> {
+		return true;
+	}
+	async editMarkup(): Promise<void> {}
 	async deleteMessage(): Promise<void> {}
 	async sendFiles(): Promise<void> {}
 	openStream(): undefined {
@@ -81,7 +89,7 @@ describe("Daemon", () => {
 			version: "0.1.0",
 			workspace,
 			agentDir,
-			state: StateStore.load(),
+			state: StateStore.load(join(root, "state.json")),
 		});
 		disposers.push(async () => {
 			await daemon.stop();
@@ -101,10 +109,12 @@ describe("Daemon", () => {
 	it("answers /settings with the live panel", async () => {
 		const harness = await createHarness();
 		await harness.deliver("/settings");
-		const panel = await harness.adapter.next("NekoPal settings");
+		const panel = await harness.adapter.next("NekoPal");
 		expect(panel).toContain("Language: en");
 		expect(panel).toContain("Memory:");
-		expect(panel).toContain("Channels: telegram");
+		// The panel carries buttons: one per area, and the language pair.
+		const keyboard = harness.adapter.keyboards.find((entry) => entry !== undefined);
+		expect(keyboard?.flat().map((button) => button.data)).toContain("nav:mdl");
 	});
 
 	it("exposes the command list a platform menu needs", async () => {

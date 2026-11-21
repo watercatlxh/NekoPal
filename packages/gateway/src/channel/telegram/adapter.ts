@@ -5,9 +5,10 @@ import { resolveConfigValueOrThrow } from "@earendil-works/pi-coding-agent";
 import { t } from "../../i18n/index.ts";
 import type { LogErrorFn, LogFn } from "../../log.ts";
 import { splitMarkdown } from "../split.ts";
-import type { Adapter, Caps, Inbound, Lang, SentHandle } from "../types.ts";
-import { TelegramApi, TelegramError, type TelegramMessage } from "./api.ts";
+import type { Adapter, Caps, ChannelAction, Inbound, Keyboard, Lang, SentHandle } from "../types.ts";
+import { TelegramApi, type TelegramCallbackQuery, TelegramError, type TelegramMessage } from "./api.ts";
 import { toMarkdownV2 } from "./mdv2.ts";
+import { keyboardToMarkup, RICH_LIMIT, toRich } from "./rich.ts";
 import { stripMdv2 } from "./strip.ts";
 
 /** Source characters per message, leaving room for the escapes MarkdownV2 adds. */
@@ -50,7 +51,7 @@ function isParseError(error: unknown): boolean {
 /** The Bot API adapter: long-polling updates, MarkdownV2 replies, photo and document uploads. */
 class TelegramAdapter implements Adapter {
 	readonly name = "telegram" as const;
-	readonly caps: Caps = { edit: true, stream: true, maxChars: MESSAGE_LIMIT };
+	readonly caps: Caps = { edit: true, stream: true, rich: true, maxChars: MESSAGE_LIMIT };
 
 	private readonly options: TelegramAdapterOptions;
 	private readonly api: TelegramApi;
@@ -58,6 +59,7 @@ class TelegramAdapter implements Adapter {
 	private offset: number;
 	private running = false;
 	private controller: AbortController | undefined;
+	private onAction: ((action: ChannelAction) => void) | undefined;
 
 	constructor(options: TelegramAdapterOptions, api: TelegramApi, lang: Lang) {
 		this.options = options;
@@ -66,9 +68,10 @@ class TelegramAdapter implements Adapter {
 		this.offset = options.offset ?? 0;
 	}
 
-	async start(onInbound: (message: Inbound) => void): Promise<void> {
+	async start(onInbound: (message: Inbound) => void, onAction?: (action: ChannelAction) => void): Promise<void> {
 		this.running = true;
 		this.controller = new AbortController();
+		this.onAction = onAction;
 		await this.registerCommands();
 		void this.loop(onInbound);
 	}
@@ -107,9 +110,14 @@ class TelegramAdapter implements Adapter {
 	}
 
 	private async handleUpdate(
-		update: { message?: TelegramMessage },
+		update: { message?: TelegramMessage; callback_query?: TelegramCallbackQuery },
 		onInbound: (message: Inbound) => void,
 	): Promise<void> {
+		const query = update.callback_query;
+		if (query) {
+			await this.handleCallback(query);
+			return;
+		}
 		const message = update.message;
 		if (!message || message.chat.type !== "private" || !message.from) return;
 		const text = message.text ?? message.caption ?? "";
@@ -153,6 +161,21 @@ class TelegramAdapter implements Adapter {
 			text,
 			attachments,
 			languageCode: message.from.language_code,
+		});
+	}
+
+	private async handleCallback(query: TelegramCallbackQuery): Promise<void> {
+		// Acknowledge first: the client spins until this call lands, and the routing below may take
+		// longer than the callback's own timeout.
+		await this.answerAction(query.id);
+		const message = query.message;
+		if (!message || !query.data) return;
+		this.onAction?.({
+			channel: "telegram",
+			chatId: String(message.chat.id),
+			userId: String(query.from.id),
+			messageId: String(message.message_id),
+			data: query.data,
 		});
 	}
 
@@ -207,6 +230,74 @@ class TelegramAdapter implements Adapter {
 		return handles;
 	}
 
+	/**
+	 * Send one message as rich Markdown, so lists, tables and `<details>` render as Telegram's own
+	 * constructs. Falls back to MarkdownV2, then to stripped text, when Telegram rejects the payload.
+	 */
+	async sendRich(chatId: string, markdown: string, replyTo?: string, keyboard?: Keyboard): Promise<SentHandle> {
+		const body: Record<string, unknown> = { chat_id: chatId, rich_message: { markdown: toRich(markdown) } };
+		if (replyTo) body.reply_parameters = { message_id: Number(replyTo) };
+		const markup = keyboardToMarkup(keyboard);
+		if (markup) body.reply_markup = markup;
+		try {
+			const sent = await this.withRetry(() => this.api.call<TelegramMessage>("sendRichMessage", body));
+			return { id: String(sent.message_id) };
+		} catch (error) {
+			if (error instanceof TelegramError && error.code === 429) throw error;
+			this.options.logError("telegram: rich send rejected, falling back", error);
+		}
+		const [handle] = await this.sendMarkdown(chatId, markdown, replyTo);
+		return handle ?? { id: "" };
+	}
+
+	/** Replace a message with rich Markdown. False when it does not fit one message. */
+	async editRich(chatId: string, handle: SentHandle, markdown: string, keyboard?: Keyboard): Promise<boolean> {
+		const source = toRich(markdown);
+		if (source.length > RICH_LIMIT) return false;
+		const body: Record<string, unknown> = {
+			chat_id: chatId,
+			message_id: Number(handle.id),
+			rich_message: { markdown: source },
+		};
+		const markup = keyboardToMarkup(keyboard);
+		if (markup) body.reply_markup = markup;
+		try {
+			await this.withRetry(() => this.api.call("editMessageText", body));
+			return true;
+		} catch (error) {
+			if (error instanceof TelegramError && /message is not modified/i.test(error.description)) return true;
+			if (!(error instanceof TelegramError) || error.code === 429) throw error;
+			// A message Telegram will not take as rich (an unsupported construct, a stale id) still
+			// renders through the MarkdownV2 path, which is what the fallback exists for.
+			this.options.logError("telegram: rich edit rejected, falling back", error);
+		}
+		return this.editMarkdown(chatId, handle, markdown);
+	}
+
+	/** Swap only the buttons under a message, leaving its text alone. */
+	async editMarkup(chatId: string, handle: SentHandle, keyboard: Keyboard): Promise<void> {
+		const markup = keyboardToMarkup(keyboard) ?? { inline_keyboard: [] };
+		try {
+			await this.api.call("editMessageReplyMarkup", {
+				chat_id: chatId,
+				message_id: Number(handle.id),
+				reply_markup: markup,
+			});
+		} catch (error) {
+			if (error instanceof TelegramError && /message is not modified/i.test(error.description)) return;
+			throw error;
+		}
+	}
+
+	/** Acknowledge a button press, so the client stops its spinner. */
+	async answerAction(actionId: string, text?: string): Promise<void> {
+		try {
+			await this.api.call("answerCallbackQuery", { callback_query_id: actionId, ...(text ? { text } : {}) });
+		} catch (error) {
+			this.options.logError("telegram: could not answer the callback query", error);
+		}
+	}
+
 	private async sendChunk(chatId: string, chunk: string, replyTo: string | undefined): Promise<TelegramMessage> {
 		const body: Record<string, unknown> = { chat_id: chatId, parse_mode: "MarkdownV2", text: toMarkdownV2(chunk) };
 		if (replyTo) body.reply_parameters = { message_id: Number(replyTo) };
@@ -246,6 +337,36 @@ class TelegramAdapter implements Adapter {
 			if (error instanceof TelegramError && /message is not modified/i.test(error.description)) return;
 			throw error;
 		}
+	}
+
+	/** Replace a message through the MarkdownV2 path, used when a rich edit is rejected. */
+	private async editMarkdown(chatId: string, handle: SentHandle, markdown: string): Promise<boolean> {
+		const rendered = toMarkdownV2(markdown);
+		// A rendered reply that no longer fits one message is sent normally instead.
+		if (rendered.length > MESSAGE_LIMIT) return false;
+		try {
+			await this.withRetry(() =>
+				this.api.call("editMessageText", {
+					chat_id: chatId,
+					message_id: Number(handle.id),
+					parse_mode: "MarkdownV2",
+					text: rendered,
+				}),
+			);
+			return true;
+		} catch (error) {
+			if (error instanceof TelegramError && /message is not modified/i.test(error.description)) return true;
+			if (!isParseError(error)) throw error;
+		}
+		// The renderer produced something Telegram rejects: edit in the stripped text without a parse mode.
+		await this.withRetry(() =>
+			this.api.call("editMessageText", {
+				chat_id: chatId,
+				message_id: Number(handle.id),
+				text: stripMdv2(rendered),
+			}),
+		);
+		return true;
 	}
 
 	async deleteMessage(chatId: string, handle: SentHandle): Promise<void> {

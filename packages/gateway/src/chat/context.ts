@@ -18,7 +18,7 @@ import {
 	noOpUIContext,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import type { Adapter, Lang, SentHandle } from "../channel/types.ts";
+import type { Adapter, Keyboard, Lang, SentHandle } from "../channel/types.ts";
 import type { JobStore } from "../cron/store.ts";
 import type { NekoPalExtensionOptions } from "../extension/nekopal-extension.ts";
 import { nekopalExtension } from "../extension/nekopal-extension.ts";
@@ -30,6 +30,7 @@ import { configSetTool } from "../tools/config-set.ts";
 import { cronTool } from "../tools/cron.ts";
 import { memoryTool } from "../tools/memory.ts";
 import { sendTool } from "../tools/send.ts";
+import { webSearchTool } from "../tools/web-search.ts";
 import { builtInExtensions } from "./builtin-extensions.ts";
 import type { ChatController } from "./reply.ts";
 import { ReplyController } from "./reply.ts";
@@ -77,7 +78,6 @@ export class ChatContext implements ChatController {
 	readonly adapter: Adapter;
 	readonly chatId: string;
 	readonly userId: string;
-	readonly statuses = new Map<string, string>();
 	/** Inbound message this chat is answering, for platforms whose replies must reference it. */
 	replyTo: string | undefined;
 	lang: Lang;
@@ -221,6 +221,7 @@ export class ChatContext implements ChatController {
 				path: join(this.agentDir, "settings.toml"),
 				backupPath: join(this.agentDir, "settings.toml.bak"),
 			}),
+			webSearchTool(),
 		];
 	}
 
@@ -270,7 +271,7 @@ export class ChatContext implements ChatController {
 		}
 	}
 
-	/** The extension UI context: dialogs become chat questions, statuses join the progress line. */
+	/** The extension UI context: dialogs become chat questions; status lines have no place in a chat. */
 	private uiContext(): ExtensionUIContext {
 		return {
 			...noOpUIContext,
@@ -280,15 +281,6 @@ export class ChatContext implements ChatController {
 			notify: (message, type) => {
 				const prefix = type === "warning" ? "⚠️ " : type === "error" ? "❌ " : "";
 				void this.sendPlain(`${prefix}${message}`);
-			},
-			setStatus: (key, text) => {
-				if (text === undefined) this.statuses.delete(key);
-				else this.statuses.set(key, text);
-			},
-			setWidget: (key, lines) => {
-				const value = typeof lines === "function" ? undefined : lines;
-				if (value === undefined) this.statuses.delete(key);
-				else this.statuses.set(key, value.join(" | "));
 			},
 			select: async (title, options) => {
 				const list = options.map((option, index) => `${index + 1}. ${option}`).join("\n");
@@ -307,7 +299,7 @@ export class ChatContext implements ChatController {
 
 	/** Ask the user a question; resolves with their next message, or undefined after 10 minutes. */
 	ask(question: string): Promise<string | undefined> {
-		this.cancelPending();
+		this.discardPending();
 		const { promise, resolve } = Promise.withResolvers<string | undefined>();
 		const timer = setTimeout(() => {
 			this.pending = undefined;
@@ -345,16 +337,22 @@ export class ChatContext implements ChatController {
 		this.loginAbort = abort;
 	}
 
+	/**
+	 * Drop a pending question without touching a login: `ask()` calls this to replace an older
+	 * question, and a login's own prompts must not abort the login that is asking them.
+	 */
+	private discardPending(): void {
+		const pending = this.pending;
+		if (!pending) return;
+		this.pending = undefined;
+		clearTimeout(pending.timer);
+		pending.reject(new Error("cancelled"));
+	}
+
 	/** Cancel a pending question; `/cancel` also aborts a login waiting for its answer. */
 	cancelPending(): void {
-		const abort = this.loginAbort;
-		const pending = this.pending;
-		if (pending) {
-			this.pending = undefined;
-			clearTimeout(pending.timer);
-			pending.reject(new Error("cancelled"));
-		}
-		abort?.();
+		this.discardPending();
+		this.loginAbort?.();
 	}
 
 	/** Count a user turn and run the background review when the configured interval is reached. */
@@ -388,6 +386,14 @@ export class ChatContext implements ChatController {
 
 	async send(markdown: string): Promise<SentHandle[]> {
 		return this.adapter.sendMarkdown(this.chatId, markdown, this.replyTo);
+	}
+
+	async sendRich(markdown: string, replyTo?: string, keyboard?: Keyboard): Promise<SentHandle> {
+		return this.adapter.sendRich(this.chatId, markdown, replyTo ?? this.replyTo, keyboard);
+	}
+
+	async editRich(handle: SentHandle, markdown: string, keyboard?: Keyboard): Promise<boolean> {
+		return this.adapter.editRich(this.chatId, handle, markdown, keyboard);
 	}
 
 	async sendPlain(text: string): Promise<void> {

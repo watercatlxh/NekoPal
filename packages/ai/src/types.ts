@@ -68,7 +68,7 @@ export type KnownClassifierApi = "openai-decisions";
 
 export type ClassifierApi = KnownClassifierApi | (string & {});
 
-export type KnownProvider = "anthropic" | "openai" | "openai-codex" | "xai";
+export type KnownProvider = "anthropic" | "openai" | "openai-codex" | "google" | "xai";
 export type ProviderId = KnownProvider | string;
 
 export type ToolChoice = "auto" | "none";

@@ -1,4 +1,5 @@
 import { anthropicOAuth } from "./auth/oauth/anthropic.ts";
+import { antigravityOAuth } from "./auth/oauth/antigravity.ts";
 import { registerBundledOAuthFlowLoaders } from "./auth/oauth/load.ts";
 import { openaiChatGPTOAuth } from "./auth/oauth/openai-chatgpt.ts";
 import { openaiCodexOAuth } from "./auth/oauth/openai-codex.ts";
@@ -11,5 +12,6 @@ export function registerBunOAuthFlows(): void {
 		openaiCodex: () => openaiCodexOAuth,
 		openaiChatGPT: () => openaiChatGPTOAuth,
 		xai: () => xaiOAuth,
+		antigravity: () => antigravityOAuth,
 	});
 }

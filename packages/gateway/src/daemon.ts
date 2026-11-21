@@ -124,9 +124,16 @@ export class Daemon {
 			{ path: join(dataDir, "settings.toml.bak"), message: "settings.toml.bak is protected" },
 			{ path: join(dataDir, "auth.json"), message: "auth.json is protected; use /login and /logout" },
 			{ path: join(dataDir, "state.json"), message: "state.json is protected" },
+			{
+				path: join(dataDir, "models.json"),
+				message: "models.json is protected; add providers with /settings",
+			},
 		]);
 		for (const adapter of this.options.adapters) {
-			await adapter.start((message) => this.dispatcher.handle(message));
+			await adapter.start(
+				(message) => this.dispatcher.handle(message),
+				(action) => this.dispatcher.handleAction(action),
+			);
 			log("info", `${adapter.name} adapter started`);
 		}
 		this.scheduler.start();

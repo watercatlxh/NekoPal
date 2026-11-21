@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { afterEach } from "vitest";
-import type { Adapter, Caps, Inbound, SentHandle } from "../../src/channel/types.ts";
+import type { Adapter, Caps, Inbound, Keyboard, SentHandle } from "../../src/channel/types.ts";
 import { Dispatcher } from "../../src/chat/dispatch.ts";
 import { ChatRegistry } from "../../src/chat/registry.ts";
 import { JobStore } from "../../src/cron/store.ts";
@@ -12,40 +12,65 @@ import { SkillStore } from "../../src/memory/skills.ts";
 import { MemoryStore, PendingStore } from "../../src/memory/store.ts";
 import { StateStore } from "../../src/state.ts";
 
-const caps: Caps = { edit: true, stream: false, maxChars: 4_000 };
+const caps: Caps = { edit: true, stream: false, rich: true, maxChars: 4_000 };
 
 /** Records what the dispatcher sends; `next(needle)` resolves with the first message containing it. */
 export class FakeAdapter implements Adapter {
 	readonly name = "telegram" as const;
 	readonly caps = caps;
 	readonly sent: string[] = [];
+	readonly edits: string[] = [];
+	readonly editedIds: string[] = [];
 	readonly deleted: string[] = [];
+	/** The buttons each send or edit carried, so a test can assert the panel's layout. */
+	readonly keyboards: Array<Keyboard | undefined> = [];
 	private nextId = 1;
 	private readonly waiters: Array<{ needle: string; resolve(text: string): void }> = [];
 
 	async start(): Promise<void> {}
 	async stop(): Promise<void> {}
 
-	/** The first sent message that contains `needle`, waiting for it if necessary. */
+	/** The first sent or edited message that contains `needle`, waiting for it if necessary. */
 	next(needle = ""): Promise<string> {
-		const found = this.sent.find((text) => text.includes(needle));
+		const found = [...this.sent, ...this.edits].find((text) => text.includes(needle));
 		if (found !== undefined) return Promise.resolve(found);
 		return new Promise((resolve) => {
 			this.waiters.push({ needle, resolve });
 		});
 	}
 
+	/** Resolve every waiter whose needle `text` now satisfies. */
+	private resolveWaiters(text: string): void {
+		for (const waiter of [...this.waiters]) {
+			if (!text.includes(waiter.needle)) continue;
+			this.waiters.splice(this.waiters.indexOf(waiter), 1);
+			waiter.resolve(text);
+		}
+	}
+
 	async sendMarkdown(_chatId: string, markdown: string): Promise<SentHandle[]> {
 		this.sent.push(markdown);
-		for (const waiter of [...this.waiters]) {
-			if (!markdown.includes(waiter.needle)) continue;
-			this.waiters.splice(this.waiters.indexOf(waiter), 1);
-			waiter.resolve(markdown);
-		}
+		this.resolveWaiters(markdown);
 		return [{ id: String(this.nextId++) }];
 	}
 
+	async sendRich(_chatId: string, markdown: string, _replyTo?: string, keyboard?: Keyboard): Promise<SentHandle> {
+		const handle = { id: String(this.nextId++) };
+		this.sent.push(markdown);
+		this.keyboards.push(keyboard);
+		this.resolveWaiters(markdown);
+		return handle;
+	}
+
 	async editText(): Promise<void> {}
+	async editRich(_chatId: string, handle: SentHandle, markdown: string, keyboard?: Keyboard): Promise<boolean> {
+		this.edits.push(markdown);
+		this.editedIds.push(handle.id);
+		this.keyboards.push(keyboard);
+		this.resolveWaiters(markdown);
+		return true;
+	}
+	async editMarkup(): Promise<void> {}
 	async deleteMessage(_chatId: string, handle: SentHandle): Promise<void> {
 		this.deleted.push(handle.id);
 	}
@@ -66,6 +91,7 @@ export interface Harness {
 	adapter: FakeAdapter;
 	faux: ReturnType<typeof registerFauxProvider>;
 	deliver(text: string, userId?: string): Promise<void>;
+	press(data: string): Promise<void>;
 	settle(): Promise<void>;
 }
 
@@ -103,6 +129,7 @@ export async function createHarness(options: { allowed?: string[] } = {}): Promi
 		})),
 	});
 
+	const state = StateStore.load(join(root, "state.json"));
 	const settingsManager = SettingsManager.inMemory({
 		defaultProvider: model.provider,
 		defaultModel: model.id,
@@ -119,7 +146,7 @@ export async function createHarness(options: { allowed?: string[] } = {}): Promi
 
 	const adapter = new FakeAdapter();
 	const registry = new ChatRegistry({
-		state: StateStore.load(),
+		state,
 		workspace,
 		agentDir,
 		settingsManager,
@@ -134,7 +161,7 @@ export async function createHarness(options: { allowed?: string[] } = {}): Promi
 
 	const dispatcher = new Dispatcher({
 		registry,
-		state: StateStore.load(),
+		state,
 		settingsManager,
 		modelRuntime,
 		memory,
@@ -157,6 +184,16 @@ export async function createHarness(options: { allowed?: string[] } = {}): Promi
 	return {
 		adapter,
 		faux,
+		async press(data: string): Promise<void> {
+			dispatcher.handleAction({
+				channel: "telegram",
+				chatId: "42",
+				userId: "42",
+				messageId: String(Date.now()),
+				data,
+			});
+			await settle();
+		},
 		async deliver(text: string, userId = "42"): Promise<void> {
 			const message: Inbound = {
 				channel: "telegram",

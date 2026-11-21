@@ -16,8 +16,34 @@ export interface Caps {
 	edit: boolean;
 	/** Whether the channel renders token-by-token stream updates. */
 	stream: boolean;
+	/** Whether the channel renders rich Markdown: lists, tables and `<details>` folds. */
+	rich: boolean;
 	/** Maximum characters in one rendered message. */
 	maxChars: number;
+}
+
+/** One button under a message. */
+export interface Button {
+	readonly label: string;
+	/** Payload the channel hands back when the button is pressed (Telegram `callback_data`). */
+	readonly data: string;
+	/** Command a channel without callbacks types into the input box instead (QQ `action.type=2`). */
+	readonly command: string;
+}
+
+/** Rows of buttons, laid out as the channel displays them. */
+export type Keyboard = ReadonlyArray<ReadonlyArray<Button>>;
+
+/** A button press delivered back to the bot. */
+export interface ChannelAction {
+	readonly channel: ChannelName;
+	/** Chat the button belongs to. */
+	readonly chatId: string;
+	readonly userId: string;
+	/** Message carrying the button, so the panel can rewrite it in place. */
+	readonly messageId: string;
+	/** The pressed button's `data`. */
+	readonly data: string;
 }
 
 export type ChannelName = "telegram" | "qq";
@@ -59,12 +85,22 @@ export interface Adapter {
 	readonly name: ChannelName;
 	readonly caps: Caps;
 	/**
-	 * Start receiving. `onInbound` is called for every message; this promise resolves once the
-	 * receive loop is running and never rejects: connection problems are retried internally.
+	 * Start receiving. `onInbound` is called for every message and `onAction` for every button press;
+	 * this promise resolves once the receive loop is running and never rejects: connection problems
+	 * are retried internally.
 	 */
-	start(onInbound: (message: Inbound) => void): Promise<void>;
+	start(onInbound: (message: Inbound) => void, onAction?: (action: ChannelAction) => void): Promise<void>;
 	/** Render, split and send `markdown`, falling back to plain text when rendering fails. */
 	sendMarkdown(chatId: string, markdown: string, replyTo?: string): Promise<SentHandle[]>;
+	/**
+	 * Send one message as rich Markdown: real lists and tables, `<details>` folds, and buttons.
+	 * A channel without `caps.rich` sends it through `sendMarkdown` and ignores the buttons.
+	 */
+	sendRich(chatId: string, markdown: string, replyTo?: string, keyboard?: Keyboard): Promise<SentHandle>;
+	/** Replace a message with rich Markdown. False when the channel cannot edit or it does not fit. */
+	editRich(chatId: string, handle: SentHandle, markdown: string, keyboard?: Keyboard): Promise<boolean>;
+	/** Replace only the buttons under a message; a no-op where `caps.edit` is false. */
+	editMarkup(chatId: string, handle: SentHandle, keyboard: Keyboard): Promise<void>;
 	/** Replace the text of a sent message. Throws when `caps.edit` is false. */
 	editText(chatId: string, handle: SentHandle, plain: string): Promise<void>;
 	/** Remove a sent message, used to swap a placeholder for the final reply. */

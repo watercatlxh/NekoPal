@@ -14,5 +14,6 @@ export function registerLazyOAuthFlows(): void {
 		openaiCodex: async () => (await import("./auth/oauth/openai-codex.ts")).openaiCodexOAuth,
 		openaiChatGPT: async () => (await import("./auth/oauth/openai-chatgpt.ts")).openaiChatGPTOAuth,
 		xai: async () => (await import("./auth/oauth/xai.ts")).xaiOAuth,
+		antigravity: async () => (await import("./auth/oauth/antigravity.ts")).antigravityOAuth,
 	});
 }

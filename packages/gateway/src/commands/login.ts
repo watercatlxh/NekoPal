@@ -1,9 +1,7 @@
 import type { AuthEvent, AuthInteraction, AuthPrompt, AuthType } from "@earendil-works/pi-ai";
 import { t } from "../i18n/index.ts";
+import { LOGIN_PROVIDER_IDS } from "../panel/router.ts";
 import type { CommandContext } from "./index.ts";
-
-/** Providers a chat can sign in to; all of them use OAuth. */
-const OAUTH_PROVIDERS = ["anthropic", "openai", "openai-codex", "xai"] as const;
 
 const LOGIN_TIMEOUT_MS = 10 * 60_000;
 
@@ -61,30 +59,49 @@ export function chatInteraction(context: CommandContext): AuthInteraction {
 	};
 }
 
+/** Chats with a login in flight, so a second press cannot stack a zombie flow on the first. */
+const activeLogins = new Set<string>();
+
 /** `/login [provider]`: list the providers, or start the OAuth flow for one. */
 export async function loginCommand(context: CommandContext, args: string): Promise<void> {
 	const chat = context.chat;
 	const lang = chat.lang;
+	const key = `${chat.adapter.name}-${chat.chatId}`;
+	if (activeLogins.has(key)) {
+		await chat.sendPlain(t(lang, "login.busy"));
+		return;
+	}
 	const provider = args.trim();
 	if (!provider) {
-		const list = OAUTH_PROVIDERS.map((name) => `- ${name}`).join("\n");
+		const list = LOGIN_PROVIDER_IDS.map((name) => `- ${name}`).join("\n");
 		await chat.sendPlain(t(lang, "login.choose", { list }));
 		return;
 	}
-	if (!(OAUTH_PROVIDERS as readonly string[]).includes(provider)) {
+	if (!LOGIN_PROVIDER_IDS.includes(provider as (typeof LOGIN_PROVIDER_IDS)[number])) {
 		await chat.sendPlain(t(lang, "login.unknown", { provider }));
 		return;
 	}
 
 	const interaction = chatInteraction(context);
+	activeLogins.add(key);
 	try {
 		await context.modelRuntime.login(provider, "oauth" satisfies AuthType, interaction);
 		await chat.say("login.done", { provider });
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
-		const timedOut = interaction.signal?.aborted === true && message !== "Login cancelled";
-		await chat.sendPlain(t(lang, timedOut ? "login.timeout" : "login.cancelled"));
+		// A user abort is "cancelled"; the timer firing is "timed out"; anything else carries
+		// the provider's own message, so a failed exchange is not mistaken for a cancellation.
+		const cancelled = message === "Login cancelled" || message === "login cancelled";
+		const timedOut = !cancelled && interaction.signal?.aborted === true;
+		await chat.sendPlain(
+			cancelled
+				? t(lang, "login.cancelled")
+				: timedOut
+					? t(lang, "login.timeout")
+					: t(lang, "login.failed", { message }),
+		);
 	} finally {
+		activeLogins.delete(key);
 		chat.setLoginAbort(undefined);
 	}
 }
@@ -93,7 +110,7 @@ export async function loginCommand(context: CommandContext, args: string): Promi
 export async function logoutCommand(context: CommandContext, args: string): Promise<void> {
 	const provider = args.trim();
 	if (!provider) {
-		await context.chat.sendPlain(`Usage: /logout <${OAUTH_PROVIDERS.join("|")}>`);
+		await context.chat.sendPlain(`Usage: /logout <${LOGIN_PROVIDER_IDS.join("|")}>`);
 		return;
 	}
 	await context.modelRuntime.logout(provider);

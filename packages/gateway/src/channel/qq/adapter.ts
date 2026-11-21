@@ -4,10 +4,21 @@ import type { SettingsManager } from "@earendil-works/pi-coding-agent";
 import { resolveConfigValue } from "@earendil-works/pi-coding-agent";
 import { t } from "../../i18n/index.ts";
 import { splitMarkdown } from "../split.ts";
-import type { Adapter, Attachment, Caps, ChannelStream, Inbound, Lang, SentHandle } from "../types.ts";
+import type {
+	Adapter,
+	Attachment,
+	Caps,
+	ChannelAction,
+	ChannelStream,
+	Inbound,
+	Keyboard,
+	Lang,
+	SentHandle,
+} from "../types.ts";
 import { QqApi, QqError } from "./api.ts";
 import { PassiveBudget, ProactiveBudget, type ProactiveCounts, type ProactiveStorage } from "./budget.ts";
 import { QqGateway, type QqLog, type QqLogError, type QqMessageEvent } from "./gateway.ts";
+import { keyboardToMarkup } from "./keyboard.ts";
 import { QqStream, type StreamBudget } from "./stream.ts";
 import { stripMarkdown } from "./strip.ts";
 import { TokenProvider } from "./token.ts";
@@ -82,7 +93,7 @@ export class QqAdapter implements Adapter, QqQuotaReporter {
 		const qq = options.settingsManager.getNekoPal().channels?.qq;
 		// No in-place edits: QQ renders a reply either as a stream or as one final message.
 		this.streaming = qq?.stream ?? true;
-		this.caps = { edit: false, stream: this.streaming, maxChars: MAX_CHARS };
+		this.caps = { edit: false, stream: this.streaming, rich: false, maxChars: MAX_CHARS };
 		const defaultLang = options.settingsManager.getNekoPal().defaultLang ?? "en";
 		this.langFor = options.langFor ?? (() => defaultLang);
 		this.proactive = new ProactiveBudget({
@@ -92,7 +103,7 @@ export class QqAdapter implements Adapter, QqQuotaReporter {
 		});
 	}
 
-	async start(onInbound: (message: Inbound) => void): Promise<void> {
+	async start(onInbound: (message: Inbound) => void, _onAction?: (action: ChannelAction) => void): Promise<void> {
 		const qq = this.options.settingsManager.getNekoPal().channels?.qq;
 		const appId = qq?.appId ?? "";
 		const appSecret = resolveConfigValue(qq?.appSecret ?? "") ?? "";
@@ -119,6 +130,19 @@ export class QqAdapter implements Adapter, QqQuotaReporter {
 	}
 
 	async sendMarkdown(chatId: string, markdown: string, replyTo?: string): Promise<SentHandle[]> {
+		return this.sendWithKeyboard(chatId, markdown, replyTo);
+	}
+
+	/**
+	 * Send markdown with optional buttons. QQ attaches a keyboard to a markdown message only, and a
+	 * channel without callbacks has to use command buttons: pressing one types `/…` into the box.
+	 */
+	private async sendWithKeyboard(
+		chatId: string,
+		markdown: string,
+		replyTo?: string,
+		keyboard?: Keyboard,
+	): Promise<SentHandle[]> {
 		if (markdown.trim() === "") return [];
 		const sourceId = replyTo === "" ? undefined : replyTo;
 		const { chunks, asDocument } = splitMarkdown(markdown, { maxChars: MAX_CHARS, maxChunks: MAX_CHUNKS });
@@ -130,8 +154,10 @@ export class QqAdapter implements Adapter, QqQuotaReporter {
 		}
 
 		const handles: SentHandle[] = [];
-		for (const chunk of chunks) {
-			const sent = await this.sendChunk(chatId, chunk, sourceId);
+		for (const [index, chunk] of chunks.entries()) {
+			// Buttons belong to the last chunk, so they sit under the end of the reply.
+			const markup = index === chunks.length - 1 ? keyboardToMarkup(keyboard) : undefined;
+			const sent = await this.sendChunk(chatId, chunk, sourceId, markup);
 			if (sent === undefined) break;
 			handles.push(sent);
 		}
@@ -185,6 +211,24 @@ export class QqAdapter implements Adapter, QqQuotaReporter {
 
 	async editText(_chatId: string, _handle: SentHandle, _plain: string): Promise<void> {
 		throw new Error("qq: edit unsupported");
+	}
+
+	/**
+	 * QQ renders a markdown subset with no folds and no in-place edits, so a rich message is the same
+	 * as a normal one and the buttons become command buttons.
+	 */
+	async sendRich(chatId: string, markdown: string, replyTo?: string, keyboard?: Keyboard): Promise<SentHandle> {
+		const [handle] = await this.sendWithKeyboard(chatId, markdown, replyTo, keyboard);
+		return handle ?? { id: "" };
+	}
+
+	async editRich(_chatId: string, _handle: SentHandle, _markdown: string, _keyboard?: Keyboard): Promise<boolean> {
+		// QQ cannot edit, so a caller that needs to change a message sends a new one.
+		return false;
+	}
+
+	async editMarkup(_chatId: string, _handle: SentHandle, _keyboard: Keyboard): Promise<void> {
+		// The QQ bot API has no endpoint to change a sent message's buttons.
 	}
 
 	async deleteMessage(_chatId: string, _handle: SentHandle): Promise<void> {
@@ -277,7 +321,12 @@ export class QqAdapter implements Adapter, QqQuotaReporter {
 	 * Send one chunk, taking a passive slot when the source message still has one and a proactive
 	 * slot otherwise. Returns undefined when the reply budget is spent and the caller should stop.
 	 */
-	private async sendChunk(chatId: string, content: string, replyTo?: string): Promise<SentHandle | undefined> {
+	private async sendChunk(
+		chatId: string,
+		content: string,
+		replyTo?: string,
+		keyboard?: Record<string, unknown>,
+	): Promise<SentHandle | undefined> {
 		const api = this.api;
 		if (!api) throw new Error("qq: adapter is not started");
 
@@ -288,6 +337,7 @@ export class QqAdapter implements Adapter, QqQuotaReporter {
 		}
 
 		const payload: Record<string, unknown> = { msg_type: 2, markdown: { content }, ...targeting };
+		if (keyboard) payload.keyboard = keyboard;
 		try {
 			const response = await this.post(api, chatId, payload);
 			return { id: response.id ?? replyTo ?? "" };

@@ -19,6 +19,7 @@ export const defaultModelPerProvider: Partial<Record<KnownProvider, string>> = {
 	anthropic: "claude-opus-5-5",
 	openai: "gpt-6.2-sol",
 	"openai-codex": "gpt-6.2-sol",
+	google: "gemini-3.1-pro-preview",
 	xai: "grok-4.7",
 };
 

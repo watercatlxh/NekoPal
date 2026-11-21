@@ -3,6 +3,7 @@ import { type CreateModelsOptions, createModels, type MutableModels, type Provid
 import type { AnyModel, Api, ClassifierApi, ClassifierModel, ImageApi, ImageModel, Model } from "../types.ts";
 import { anthropicProvider } from "./anthropic.ts";
 import modelDataManifest from "./data/.manifest.json" with { type: "json" };
+import { googleProvider } from "./google.ts";
 import { openaiProvider } from "./openai.ts";
 import { openaiCodexProvider } from "./openai-codex.ts";
 import { xaiProvider } from "./xai.ts";
@@ -92,7 +93,7 @@ export function getAllBuiltinModels<TProvider extends BuiltinProvider>(provider:
 
 /** All built-in providers, freshly constructed. */
 export function builtinProviders(): Provider[] {
-	return [anthropicProvider(), openaiProvider(), openaiCodexProvider(), xaiProvider()];
+	return [anthropicProvider(), openaiProvider(), openaiCodexProvider(), googleProvider(), xaiProvider()];
 }
 
 /** A `Models` collection with every built-in provider registered. */

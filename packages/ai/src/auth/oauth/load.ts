@@ -19,6 +19,7 @@ type OAuthFlowLoaders = {
 	openaiCodex: () => OAuthAuth | Promise<OAuthAuth>;
 	openaiChatGPT: () => OAuthAuth | Promise<OAuthAuth>;
 	xai: () => OAuthAuth | Promise<OAuthAuth>;
+	antigravity: () => OAuthAuth | Promise<OAuthAuth>;
 };
 
 let bundledLoaders: OAuthFlowLoaders | undefined;
@@ -46,4 +47,9 @@ export const loadOpenAIChatGPTOAuth = async (): Promise<OAuthAuth> => {
 export const loadXaiOAuth = async (): Promise<OAuthAuth> => {
 	if (bundledLoaders) return bundledLoaders.xai();
 	return ((await importOAuthModule("./xai.ts")) as { xaiOAuth: OAuthAuth }).xaiOAuth;
+};
+
+export const loadAntigravityOAuth = async (): Promise<OAuthAuth> => {
+	if (bundledLoaders) return bundledLoaders.antigravity();
+	return ((await importOAuthModule("./antigravity.ts")) as { antigravityOAuth: OAuthAuth }).antigravityOAuth;
 };

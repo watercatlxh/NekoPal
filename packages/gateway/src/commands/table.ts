@@ -1,14 +1,16 @@
 import { DefaultPackageManager } from "@earendil-works/pi-coding-agent";
-import type { Lang } from "../channel/types.ts";
+import type { Lang, SentHandle } from "../channel/types.ts";
 import type { ChatContext } from "../chat/context.ts";
 import { nextRun } from "../cron/schedule.ts";
 import { t } from "../i18n/index.ts";
 import { logError } from "../log.ts";
+import { navButton, type PanelButton, type PanelPage, runButton, toKeyboard } from "../panel/encode.ts";
+import { removeProvider } from "../panel/models-json.ts";
+import { view as viewOf } from "../panel/router.ts";
 import type { CommandContext, CommandTable } from "./index.ts";
 import { describe, descriptionOf, formatUptime, modelLabel, parseSchedule, resolveModel } from "./index.ts";
 import { formatJobs } from "./jobs.ts";
-import { loginCommand, logoutCommand } from "./login.ts";
-import { formatPending, formatStored, formatUsage, storedEntries } from "./memory.ts";
+import { formatPending, formatStored, storedEntries } from "./memory.ts";
 
 const HELP_ORDER = [
 	"help",
@@ -21,11 +23,6 @@ const HELP_ORDER = [
 	"model",
 	"memory",
 	"jobs",
-	"lang",
-	"login",
-	"logout",
-	"install",
-	"remove",
 	"packages",
 	"cancel",
 ];
@@ -82,34 +79,8 @@ export function createCommands(): CommandTable {
 
 	commands.set("settings", {
 		description: (lang) => t(lang, "cmd.settings.desc"),
-		async run(context) {
-			const chat = chatOf(context);
-			const lang = chat.lang;
-			const settings = context.settingsManager.getNekoPal();
-			const usage = formatUsage(context.memory);
-			const pending = context.pending.list().length;
-			const jobs = context.jobs.load().filter((job) => job.enabled).length;
-			const lines = [
-				t(lang, "settings.header"),
-				t(lang, "settings.model", {
-					model: modelLabel(chat.session),
-					thinking: chat.session.thinkingLevel,
-				}),
-				t(lang, "settings.lang", { lang }),
-				t(lang, "settings.memory", {
-					memory: usage.memory,
-					memoryBudget: settings.memory?.memoryChars ?? 0,
-					memoryPercent: Math.round((usage.memory / (settings.memory?.memoryChars ?? 1)) * 100),
-					user: usage.user,
-					userBudget: settings.memory?.userChars ?? 0,
-				}),
-			];
-			if (pending > 0) lines.push(t(lang, "settings.pending", { n: pending }));
-			lines.push(t(lang, "settings.jobs", { n: jobs }));
-			lines.push(t(lang, "settings.channels", { channels: context.enabledChannels.join(" · ") }));
-			const quota = context.qqQuota?.();
-			if (quota) lines.push(quota);
-			await chat.sendPlain(lines.join("\n"));
+		async run(context, args) {
+			await runSettings(context, args.trim());
 		},
 	});
 
@@ -124,17 +95,7 @@ export function createCommands(): CommandTable {
 	commands.set("sessions", {
 		description: (lang) => t(lang, "cmd.sessions.desc"),
 		async run(context) {
-			const chat = chatOf(context);
-			const sessions = await context.chat.listSessions();
-			if (sessions.length === 0) {
-				await chat.say("session.listEmpty");
-				return;
-			}
-			const lines = sessions.slice(0, 10).map((session, index) => {
-				const first = session.firstMessage.replace(/\s+/g, " ").slice(0, 40);
-				return `${index + 1}. ${session.modified.toLocaleString()} · ${first} · ${session.id.slice(0, 8)}`;
-			});
-			await chat.sendPlain(lines.join("\n"));
+			await showResume(context, 0);
 		},
 	});
 
@@ -143,6 +104,11 @@ export function createCommands(): CommandTable {
 		async run(context, args) {
 			const chat = chatOf(context);
 			const sessions = await context.chat.listSessions();
+			// No argument lists them as a paged panel; an argument resumes directly.
+			if (args.trim() === "") {
+				await showResume(context, 0);
+				return;
+			}
 			const index = Number(args);
 			const target = Number.isInteger(index) && index >= 1 ? sessions[index - 1] : undefined;
 			const found = target ?? sessions.find((session) => session.id.startsWith(args));
@@ -325,56 +291,10 @@ export function createCommands(): CommandTable {
 		},
 	});
 
-	commands.set("lang", {
-		description: (lang) => t(lang, "cmd.lang.desc"),
-		async run(context, args) {
-			const next = args.trim().toLowerCase();
-			if (next !== "en" && next !== "zh") {
-				await context.chat.sendPlain("Usage: /lang <en|zh>");
-				return;
-			}
-			context.setLang(next);
-			await context.chat.say("lang.set", { lang: next });
-		},
-	});
-
-	commands.set("login", {
-		description: (lang) => t(lang, "cmd.login.desc"),
-		async run(context, args) {
-			await loginCommand(context, args);
-		},
-	});
-
-	commands.set("logout", {
-		description: (lang) => t(lang, "cmd.logout.desc"),
-		async run(context, args) {
-			await logoutCommand(context, args);
-		},
-	});
-
-	commands.set("install", {
-		description: (lang) => t(lang, "cmd.install.desc"),
-		async run(context, args) {
-			await installCommand(context, args, "install");
-		},
-	});
-
-	commands.set("remove", {
-		description: (lang) => t(lang, "cmd.remove.desc"),
-		async run(context, args) {
-			await installCommand(context, args, "remove");
-		},
-	});
-
 	commands.set("packages", {
 		description: (lang) => t(lang, "cmd.packages.desc"),
-		async run(context) {
-			const packages = context.settingsManager.getPackages();
-			await context.chat.sendPlain(
-				packages.length === 0
-					? t(context.chat.lang, "pkg.list", { list: "(none)" })
-					: t(context.chat.lang, "pkg.list", { list: packages.join("\n") }),
-			);
+		async run(context, args) {
+			await runPackages(context, args.trim());
 		},
 	});
 
@@ -388,19 +308,158 @@ export function createCommands(): CommandTable {
 	return commands;
 }
 
-async function installCommand(context: CommandContext, source: string, action: "install" | "remove"): Promise<void> {
+/**
+ * Show a panel page: buttons where the channel has them, the same text where it does not.
+ *
+ * `handle` rewrites an existing message in place, which is what a button press does; without it the
+ * page opens as a new message.
+ */
+export async function showPanel(
+	context: CommandContext,
+	page: PanelPage,
+	handle?: SentHandle,
+	arg = "",
+): Promise<void> {
 	const chat = context.chat;
-	if (!source.trim()) {
-		await chat.sendPlain(`Usage: /${action} <source>`);
+	const view = viewOf(context, page, arg);
+	if (!chat.adapter.caps.edit) {
+		// No buttons and no way to rewrite the message: the text alone is still useful.
+		await chat.sendPlain(view.text);
 		return;
 	}
-	const manager = new DefaultPackageManager({
-		cwd: chat.workspace,
-		agentDir: context.agentDir,
-		settingsManager: context.settingsManager,
-	});
-	if (action === "install") await manager.installAndPersist(source);
-	else await manager.removeAndPersist(source);
-	for (const other of context.registry.all()) await other.session.reload();
-	await chat.say(action === "install" ? "pkg.installed" : "pkg.removed", { source });
+	const keyboard = toKeyboard(view.rows);
+	if (handle !== undefined && (await chat.editRich(handle, view.text, keyboard))) return;
+	await chat.sendRich(view.text, undefined, keyboard);
+}
+
+/** A page name as `/settings <page>` spells it, or undefined when it is not one. */
+export function isPage(name: string): name is PanelPage {
+	return (
+		name === "set" ||
+		name === "mdl" ||
+		name === "pvd" ||
+		name === "ses" ||
+		name === "pkg" ||
+		name === "mem" ||
+		name === "job"
+	);
+}
+
+/** Sessions per page of the `/resume` panel. */
+const SESSIONS_PER_PAGE = 5;
+/** Page buttons shown at once, so the row stays tappable. */
+const MAX_PAGE_BUTTONS = 5;
+
+/**
+ * Show the sessions of this chat as pages of buttons.
+ *
+ * A press resumes the session it names; the page buttons move between pages without leaving the
+ * panel, which is what makes a long history usable from a phone.
+ */
+export async function showResume(context: CommandContext, page: number): Promise<void> {
+	const chat = context.chat;
+	const sessions = await chat.listSessions();
+	if (sessions.length === 0) {
+		await chat.sendPlain(t(chat.lang, "session.listEmpty"));
+		return;
+	}
+	const pages = Math.ceil(sessions.length / SESSIONS_PER_PAGE);
+	const current = Math.min(Math.max(page, 0), pages - 1);
+	const slice = sessions.slice(current * SESSIONS_PER_PAGE, (current + 1) * SESSIONS_PER_PAGE);
+	const lines = [t(chat.lang, "session.pages", { total: sessions.length, page: current + 1, pages })];
+	const rows: PanelButton[][] = [];
+	for (const [offset, session] of slice.entries()) {
+		const number = current * SESSIONS_PER_PAGE + offset + 1;
+		const first = session.firstMessage.replace(/\s+/g, " ").slice(0, 28);
+		rows.push([runButton(`${number}. ${first}`, "ses", "resume", String(number), `/resume ${number}`)]);
+	}
+	if (pages > 1) {
+		const pageRow: PanelButton[] = [];
+		if (current > 0) pageRow.push(runButton("⬅️", "ses", "page", String(current - 1), `/resume page ${current - 1}`));
+		const from = Math.max(0, Math.min(current - Math.floor(MAX_PAGE_BUTTONS / 2), pages - MAX_PAGE_BUTTONS));
+		for (let index = from; index < Math.min(pages, from + MAX_PAGE_BUTTONS); index += 1) {
+			pageRow.push(
+				runButton(
+					index === current ? `·${index + 1}·` : String(index + 1),
+					"ses",
+					"page",
+					String(index),
+					`/resume page ${index}`,
+				),
+			);
+		}
+		if (current < pages - 1)
+			pageRow.push(runButton("➡️", "ses", "page", String(current + 1), `/resume page ${current + 1}`));
+		rows.push(pageRow);
+	}
+	rows.push([navButton(t(chat.lang, "panel.back"), "set")]);
+	await chat.sendRich(lines.join("\n"), undefined, toKeyboard(rows));
+}
+
+/**
+ * `/settings [page]`: the panel root, or one of its pages by name.
+ *
+ * `/settings lang <en|zh>` and `/settings pvd rm <id>` are the two actions a button cannot carry
+ * alone, so they are reachable by typing as well.
+ */
+async function runSettings(context: CommandContext, args: string): Promise<void> {
+	const chat = context.chat;
+	const [head = "", ...rest] = args.split(/\s+/).filter(Boolean);
+	if (head === "page") {
+		await showResume(context, Number(rest[0] ?? "0"));
+		return;
+	}
+	if (head === "resume" && rest[0] === "page") {
+		await showResume(context, Number(rest[1] ?? "0"));
+		return;
+	}
+	if (head === "lang") {
+		const next = rest[0]?.toLowerCase();
+		if (next !== "en" && next !== "zh") {
+			await chat.sendPlain("Usage: /settings lang <en|zh>");
+			return;
+		}
+		context.setLang(next);
+		await showPanel(context, "set");
+		return;
+	}
+	if (head === "pvd" && rest[0] === "rm") {
+		const id = rest[1] ?? "";
+		if (id === "" || !removeProvider(context.agentDir, id)) {
+			await chat.sendPlain(`没有自定义提供商 ${id}`);
+			return;
+		}
+		await context.modelRuntime.refresh();
+		await chat.say("wizard.removed", { id });
+		await showPanel(context, "pvd");
+		return;
+	}
+	await showPanel(context, isPage(head) ? head : "set", undefined, rest.join(" "));
+}
+
+/**
+ * `/packages [rm <n>]`: the package panel, or the removal a button stands for.
+ *
+ * Installing asks for a source in the chat, so it needs no argument.
+ */
+async function runPackages(context: CommandContext, args: string): Promise<void> {
+	const [head, ref = ""] = args.split(/\s+/).filter(Boolean);
+	if (head === "rm") {
+		const manager = new DefaultPackageManager({
+			cwd: context.chat.workspace,
+			agentDir: context.agentDir,
+			settingsManager: context.settingsManager,
+		});
+		const target = manager.listConfiguredPackages()[Number(ref)];
+		if (!target) {
+			await context.chat.sendPlain(`没有第 ${ref} 个扩展包`);
+			return;
+		}
+		await manager.removeAndPersist(target.source);
+		for (const other of context.registry.all()) await other.session.reload();
+		await context.chat.say("pkg.removed", { source: target.source });
+		await showPanel(context, "pkg");
+		return;
+	}
+	await showPanel(context, "pkg");
 }
