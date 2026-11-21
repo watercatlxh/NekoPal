@@ -21,7 +21,15 @@ import { t } from "../i18n/index.ts";
 import { log } from "../log.ts";
 import type { MemoryStore, PendingStore } from "../memory/store.ts";
 import { discoverModels } from "../panel/discover.ts";
-import { actButton, decode, type PanelButton, type PanelPress, pendingKey, resolvePanelKey } from "../panel/encode.ts";
+import {
+	actButton,
+	decode,
+	type PanelButton,
+	type PanelPress,
+	panelKey,
+	pendingKey,
+	resolvePanelKey,
+} from "../panel/encode.ts";
 import { API_KINDS, listCustomProviders, providerTaken, upsertProvider } from "../panel/models-json.ts";
 import { commandFor, LOGIN_PROVIDER_IDS } from "../panel/router.ts";
 import type { ProviderDraft } from "../panel/wizard.ts";
@@ -189,6 +197,17 @@ export class Dispatcher {
 			else await showPanel(context, page);
 			return true;
 		};
+		if (page === "think" && verb === "set") {
+			const model = chat.session.model;
+			const [key, value, extra] = arg.split(":");
+			if (!model?.reasoning || extra !== undefined || key !== panelKey([model.provider, model.id])) return stale();
+			const level = chat.session.getAvailableThinkingLevels().find((candidate) => candidate === value);
+			if (!level) return stale();
+			this.leaveFlow(chat);
+			chat.session.setThinkingLevel(level, { persist: true });
+			await showPanel(context, "think");
+			return true;
+		}
 		if (page === "mdl" && ["pvd", "pg", "set"].includes(verb)) {
 			const runtime = chat.session.modelRuntime;
 			const models = runtime.getAvailableSnapshot();

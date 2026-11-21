@@ -239,6 +239,7 @@ class TelegramAdapter implements Adapter {
 			const form = new FormData();
 			form.set("chat_id", chatId);
 			form.set("caption", caption);
+			if (replyTo) form.set("reply_parameters", JSON.stringify({ message_id: Number(replyTo) }));
 			form.set(
 				"document",
 				new Blob([new Uint8Array(Buffer.from(markdown, "utf-8"))], { type: "text/markdown" }),
@@ -271,15 +272,12 @@ class TelegramAdapter implements Adapter {
 		return this.withRetry(() => post({ text: `🔧 ${fields.name}\n${fields.details}` }));
 	}
 
-	async sendToolCall(chatId: string, name: string, details: string, replyTo?: string): Promise<SentHandle> {
+	async sendToolCall(chatId: string, name: string, details: string): Promise<SentHandle> {
 		try {
 			const sent = await this.deliverToolCall(name, details, (text) =>
 				this.api.sendMessage({
 					chat_id: chatId,
 					...text,
-					...(replyTo
-						? { reply_parameters: { message_id: Number(replyTo), allow_sending_without_reply: true } }
-						: {}),
 				}),
 			);
 			return { id: String(sent.message_id) };

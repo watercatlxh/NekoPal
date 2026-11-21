@@ -121,7 +121,9 @@ export async function settle(): Promise<void> {
 	for (let index = 0; index < 10; index++) await new Promise((resolve) => setImmediate(resolve));
 }
 
-export async function createHarness(options: { allowed?: string[]; channel?: ChannelName } = {}): Promise<Harness> {
+export async function createHarness(
+	options: { allowed?: string[]; channel?: ChannelName; reasoning?: boolean } = {},
+): Promise<Harness> {
 	const root = mkdtempSync(join(tmpdir(), "nekopal-dispatch-"));
 	const agentDir = join(root, "agent");
 	const workspace = join(root, "workspace");
@@ -130,7 +132,9 @@ export async function createHarness(options: { allowed?: string[]; channel?: Cha
 	const authPath = join(agentDir, "auth.json");
 	writeFileSync(authPath, JSON.stringify({ faux: { type: "api_key", key: "faux-key" } }), "utf-8");
 
-	const faux = registerFauxProvider({ models: [{ id: "faux-1", contextWindow: 100_000, maxTokens: 1_000 }] });
+	const faux = registerFauxProvider({
+		models: [{ id: "faux-1", contextWindow: 100_000, maxTokens: 1_000, reasoning: options.reasoning ?? false }],
+	});
 	const model = faux.getModel();
 	const modelRuntime = await ModelRuntime.create({ authPath, modelsPath: null });
 	modelRuntime.registerProvider(model.provider, {

@@ -105,8 +105,8 @@ export interface Adapter {
 	sendRich(chatId: string, markdown: string, replyTo?: string, keyboard?: Keyboard): Promise<SentHandle>;
 	/** Replace a message with rich Markdown. False when the channel cannot edit or it does not fit. */
 	editRich(chatId: string, handle: SentHandle, markdown: string, keyboard?: Keyboard): Promise<boolean>;
-	/** A pair of optional operations for a tool card. Both fields are literal, unescaped text. */
-	sendToolCall?(chatId: string, name: string, details: string, replyTo?: string): Promise<SentHandle>;
+	/** Standalone tool card; both fields are literal, unescaped text. */
+	sendToolCall?(chatId: string, name: string, details: string): Promise<SentHandle>;
 	editToolCall?(chatId: string, handle: SentHandle, name: string, details: string): Promise<boolean>;
 	/** Replace only the buttons under a message; a no-op where `caps.edit` is false. */
 	editMarkup(chatId: string, handle: SentHandle, keyboard: Keyboard): Promise<void>;

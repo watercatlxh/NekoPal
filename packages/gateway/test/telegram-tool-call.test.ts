@@ -33,7 +33,6 @@ const name = "r<&";
 const details = `path: a&b\n\nx</blockquote> '"`;
 const html =
 	"🔧 <b>r&lt;&amp;</b>\n<blockquote expandable>path: a&amp;b\n\nx&lt;/blockquote&gt; &#39;&quot;</blockquote>";
-const reply = { message_id: 9, allow_sending_without_reply: true };
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -41,7 +40,7 @@ describe("Telegram tool cards", () => {
 	it("posts HTML, then edits the same message using independently escaped literal fields", async () => {
 		const { adapter, send, requests } = wire();
 		send.mockResolvedValueOnce(ok()).mockResolvedValueOnce(ok());
-		const handle = await adapter.sendToolCall!("42", name, "", "9");
+		const handle = await adapter.sendToolCall!("42", name, "");
 		expect(handle).toEqual({ id: "71" });
 		expect(await adapter.editToolCall!("42", handle, name, details)).toBe(true);
 		expect(requests()).toEqual([
@@ -50,7 +49,6 @@ describe("Telegram tool cards", () => {
 				body: {
 					chat_id: "42",
 					parse_mode: "HTML",
-					reply_parameters: reply,
 					text: "🔧 <b>r&lt;&amp;</b>\n<blockquote expandable>…</blockquote>",
 				},
 			},
@@ -58,19 +56,19 @@ describe("Telegram tool cards", () => {
 		]);
 	});
 
-	it("falls back on parse rejection to unencoded fields, retaining the reply and edit target", async () => {
+	it("falls back to standalone plain text on parse rejection and retains the edit target", async () => {
 		const { adapter, send, requests } = wire();
 		send
 			.mockResolvedValueOnce(parseError())
 			.mockResolvedValueOnce(ok())
 			.mockResolvedValueOnce(parseError())
 			.mockResolvedValueOnce(fail(400, "message is not modified"));
-		const handle = await adapter.sendToolCall!("42", name, details, "9");
+		const handle = await adapter.sendToolCall!("42", name, details);
 		expect(await adapter.editToolCall!("42", handle, name, details)).toBe(true);
 		const text = `🔧 ${name}\n${details}`;
 		expect(requests()).toEqual([
-			{ method: "sendMessage", body: { chat_id: "42", reply_parameters: reply, text: html, parse_mode: "HTML" } },
-			{ method: "sendMessage", body: { chat_id: "42", reply_parameters: reply, text } },
+			{ method: "sendMessage", body: { chat_id: "42", text: html, parse_mode: "HTML" } },
+			{ method: "sendMessage", body: { chat_id: "42", text } },
 			{ method: "editMessageText", body: { chat_id: "42", message_id: 71, text: html, parse_mode: "HTML" } },
 			{ method: "editMessageText", body: { chat_id: "42", message_id: 71, text } },
 		]);

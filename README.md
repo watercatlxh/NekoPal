@@ -81,7 +81,7 @@ Then open `/settings` in chat and select a configured model.
 | `/settings` | Open Sessions, Model, Memory, Jobs, or System status |
 | `/new`, `/sessions`, `/resume <n\|id>` | Start a fresh session, list recent ones, switch to one |
 | `/stop` | Abort the running reply |
-| `/model [provider/id]` | Show or switch the model (persisted) |
+| `/model [provider/id]` | Open the model and thinking-level menu, or switch directly to a named model. Selecting a thinking level also saves the default. |
 | `/memory [list\|approve\|reject\|forget]` | Review and edit saved memories |
 | `/jobs [list\|add\|rm\|pause\|resume]` | Manage scheduled jobs |
 | `/settings lang <en\|zh>` | Switch the chat language; also available in System status |

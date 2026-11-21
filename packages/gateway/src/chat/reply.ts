@@ -138,11 +138,11 @@ class RunDelivery {
 		if (this.tools.has(id)) return;
 		const entry: ToolEntry = { id, name, args, summary: summarizeArgs(name, args), status: "running" };
 		this.tools.set(id, entry);
-		const { adapter, chatId, replyTo } = this;
+		const { adapter, chatId } = this;
 		const send = adapter.sendToolCall;
 		if (send && adapter.editToolCall) {
 			entry.initial = this.enqueue("could not send the tool message", () =>
-				send.call(adapter, chatId, name, toolBody(args, ""), replyTo),
+				send.call(adapter, chatId, name, toolBody(args, "")),
 			);
 		}
 	}
@@ -159,7 +159,7 @@ class RunDelivery {
 			}
 			return;
 		}
-		const { adapter, chatId, replyTo, lang } = this;
+		const { adapter, chatId, lang } = this;
 		void this.enqueue("could not finish the tool message", async () => {
 			const details = toolBody(entry.args, resultText(result), failed ? t(lang, "reply.toolFailed") : undefined);
 			let handle: SentHandle | undefined;
@@ -169,7 +169,7 @@ class RunDelivery {
 				if (!(error instanceof ToolCallRejected)) return; // Ambiguous delivery; never duplicate it.
 			}
 			if (handle && (await adapter.editToolCall!(chatId, handle, entry.name, details))) return;
-			await adapter.sendToolCall!(chatId, entry.name, details, replyTo);
+			await adapter.sendToolCall!(chatId, entry.name, details);
 		});
 	}
 

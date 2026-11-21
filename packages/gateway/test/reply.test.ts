@@ -275,7 +275,7 @@ describe("ReplyController", () => {
 			const replace = failure === "rejected" || failure === "not editable";
 			expect(send).toHaveBeenCalledTimes(replace ? 2 : 1);
 			expect(edit).toHaveBeenCalledTimes(failure === "not editable" || failure === "edit timeout" ? 1 : 0);
-			if (replace) expect(send).toHaveBeenLastCalledWith("42", "read", "result", "7");
+			if (replace) expect(send).toHaveBeenLastCalledWith("42", "read", "result");
 			expect(chat.shown.at(-1)?.markdown).toBe("answer");
 			expect(chat.deleted).toEqual([]);
 		},

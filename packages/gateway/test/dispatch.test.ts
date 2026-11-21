@@ -38,11 +38,48 @@ describe("Dispatcher", () => {
 });
 
 describe("panel button presses", () => {
-	it("lists configured models rather than every bundled provider in /model", async () => {
-		const h = await createHarness();
+	it.each(["telegram", "qq"] as const)("can select a supported thinking level from /model on %s", async (channel) => {
+		const h = await createHarness({ channel, reasoning: true });
 		await h.deliver("/model");
-		const list = await h.adapter.next("faux: faux-1");
-		expect(list).not.toMatch(/^(?:google|anthropic|openai|xai):/m);
+		const buttons = () => h.adapter.keyboards.at(-1)!.flat();
+		const click = async (data: string) => {
+			const button = buttons().find((b) => b.data === data)!;
+			if (channel === "qq") await h.deliver(button.command);
+			else await h.press(button.data, h.adapter.panelSends[0].id);
+		};
+		expect(
+			buttons()
+				.filter((b) => b.data.startsWith("mdl:pvd:"))
+				.map((b) => b.data),
+		).toEqual([`mdl:pvd:${panelKey(["faux"])}`]);
+		await click("nav:think");
+		const key = panelKey(["faux", "faux-1"]);
+		await click(`think:set:${key}:high`);
+		expect(buttons().find((b) => b.label === "✓ high")?.data).toBe(`think:set:${key}:high`);
+		expect(h.registry.all()[0].session.thinkingLevel).toBe("high");
+		expect(h.settingsManager.getDefaultThinkingLevel()).toBe("high");
+		await h.deliver(`/settings act think:set:${panelKey(["faux", "old"])}:low`);
+		await h.deliver(`/settings act think:set:${key}:max`);
+		expect(h.registry.all()[0].session.thinkingLevel).toBe("high");
+		expect(h.settingsManager.getDefaultThinkingLevel()).toBe("high");
+		await click("nav:mdl");
+		await click(`mdl:pvd:${panelKey(["faux"])}`);
+		await click(`mdl:set:${key}`);
+		expect(h.settingsManager.getDefaultModel()).toBe("faux-1");
+	});
+
+	it("does not offer thinking changes for a non-reasoning model", async () => {
+		const h = await createHarness();
+		await h.deliver("/model faux/faux-1");
+		expect(h.settingsManager.getDefaultModel()).toBe("faux-1");
+		await h.deliver("/settings think");
+		expect(
+			h.adapter.keyboards
+				.at(-1)
+				?.flat()
+				.map((b) => b.data),
+		).toEqual(["nav:mdl"]);
+		expect(h.adapter.sent.at(-1)).toContain("no adjustable thinking level");
 	});
 
 	it("asks for explicit reselection before prompting with a retired saved model", async () => {

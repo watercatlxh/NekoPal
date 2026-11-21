@@ -9,7 +9,7 @@ import { pageFooter, pageSlice, preview } from "../panel/model.ts";
 import { removeProvider } from "../panel/models-json.ts";
 import { view as viewOf } from "../panel/router.ts";
 import type { CommandContext, CommandTable } from "./index.ts";
-import { describe, descriptionOf, formatUptime, modelLabel, parseSchedule, resolveModel } from "./index.ts";
+import { describe, descriptionOf, formatUptime, parseSchedule, resolveModel } from "./index.ts";
 import { formatJobs } from "./jobs.ts";
 import { formatPending, formatStored, storedEntries } from "./memory.ts";
 
@@ -135,24 +135,7 @@ export function createCommands(): CommandTable {
 		description: (lang) => t(lang, "cmd.model.desc"),
 		async run(context, args) {
 			const chat = chatOf(context);
-			const lang = chat.lang;
-			if (!args) {
-				const notice = await googleRosterNotice(context);
-				const models = chat.session.modelRuntime.getAvailableSnapshot();
-				const groups = new Map<string, string[]>();
-				for (const model of models) {
-					const list = groups.get(model.provider) ?? [];
-					if (list.length < 10) list.push(model.id);
-					groups.set(model.provider, list);
-				}
-				const lines = [
-					t(lang, "model.current", { model: modelLabel(chat.session), thinking: chat.session.thinkingLevel }),
-				];
-				for (const [provider, ids] of groups) lines.push(`${provider}: ${ids.join(", ")}`);
-				if (notice) lines.push(notice);
-				await chat.sendPlain(lines.join("\n"));
-				return;
-			}
+			if (!args) return showPanel(context, "mdl");
 			const model = resolveModel(chat.session, args);
 			if (!model) {
 				await chat.say("model.notFound", { ref: args });
@@ -359,6 +342,7 @@ export function isPage(name: string): name is PanelPage {
 	return (
 		name === "set" ||
 		name === "mdl" ||
+		name === "think" ||
 		name === "pvd" ||
 		name === "ses" ||
 		name === "pkg" ||

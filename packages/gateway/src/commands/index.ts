@@ -82,11 +82,6 @@ export function formatUptime(ms: number): string {
 	return `${seconds}s`;
 }
 
-export function modelLabel(session: AgentSession): string {
-	const model = session.model;
-	return model ? `${model.provider}/${model.id}` : "none";
-}
-
 /** Resolve `provider/id` (with optional thinking suffix) against the runtime's models. */
 export function resolveModel(session: AgentSession, text: string) {
 	const runtime = session.modelRuntime;

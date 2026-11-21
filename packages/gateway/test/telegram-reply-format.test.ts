@@ -167,6 +167,8 @@ describe("Telegram's per-chat reply format", () => {
 		await run.onEvent(settled);
 		vi.useRealTimers();
 		const messages = requests();
+		expect(messages[0].body).not.toHaveProperty("reply_parameters");
+		expect(messages[2].body.reply_parameters).toEqual({ message_id: 7 });
 		expect(messages).toMatchObject([
 			{
 				method: "sendMessage",

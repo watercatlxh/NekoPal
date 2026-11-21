@@ -9,7 +9,7 @@
 import { createHash } from "node:crypto";
 
 /** The panel page a button belongs to; pressing it re-renders that page. */
-export type PanelPage = "set" | "mdl" | "pvd" | "ses" | "pkg" | "mem" | "job" | "sys";
+export type PanelPage = "set" | "mdl" | "think" | "pvd" | "ses" | "pkg" | "mem" | "job" | "sys";
 
 /** Telegram's hard limit for one button payload, in bytes. */
 const MAX_DATA_BYTES = 64;
@@ -48,6 +48,7 @@ export interface PanelPress {
 const PAGES: Record<string, PanelPage> = {
 	set: "set",
 	mdl: "mdl",
+	think: "think",
 	pvd: "pvd",
 	ses: "ses",
 	pkg: "pkg",

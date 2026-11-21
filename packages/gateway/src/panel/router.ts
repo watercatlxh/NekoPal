@@ -5,7 +5,7 @@
 import { DefaultPackageManager } from "@earendil-works/pi-coding-agent";
 import type { CommandContext } from "../commands/index.ts";
 import { formatPending, storedEntries } from "../commands/memory.ts";
-import { type PanelPage, type PanelPress, pendingKey } from "./encode.ts";
+import { type PanelPage, type PanelPress, panelKey, pendingKey } from "./encode.ts";
 import { type PanelSnapshot, type PanelView, type ProviderView, renderPage } from "./model.ts";
 import { listCustomProviders } from "./models-json.ts";
 
@@ -56,6 +56,9 @@ export function snapshot(context: CommandContext): PanelSnapshot {
 		version: context.version,
 		model: model ? `${model.provider}/${model.id}` : "none",
 		thinking: chat.session.thinkingLevel,
+		thinkingOptions: model?.reasoning
+			? { modelKey: panelKey([model.provider, model.id]), levels: chat.session.getAvailableThinkingLevels() }
+			: undefined,
 		uptimeMs: Date.now() - context.startedAt,
 		sessionId: stats.sessionId,
 		messages: stats.totalMessages,

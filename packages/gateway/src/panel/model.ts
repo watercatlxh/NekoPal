@@ -29,6 +29,7 @@ export interface PanelSnapshot {
 	readonly version: string;
 	readonly model: string;
 	readonly thinking: string;
+	readonly thinkingOptions?: { readonly modelKey: string; readonly levels: readonly string[] };
 	readonly uptimeMs: number;
 	readonly sessionId: string;
 	readonly messages: number;
@@ -193,10 +194,13 @@ function modelsPage(snapshot: PanelSnapshot, page: number): PanelView {
 			panelKey([provider.id]),
 		),
 	);
-	const title = t(lang, "panel.mdlTitle", { model: preview(snapshot.model) });
+	const title = t(lang, "panel.mdlTitle", { model: preview(snapshot.model), thinking: snapshot.thinking });
 	return {
 		text: [pageTitle(title, slice), ...(buttons.length ? [] : [t(lang, "panel.empty")])].join("\n"),
-		rows: pagedRows(lang, "mdl", "set", slice, grid(buttons), [navButton(t(lang, "panel.pvd"), "pvd")]),
+		rows: pagedRows(lang, "mdl", "set", slice, grid(buttons), [
+			navButton(t(lang, "panel.pvd"), "pvd"),
+			navButton(t(lang, "panel.think"), "think"),
+		]),
 	};
 }
 
@@ -218,10 +222,34 @@ function providerModelsPage(
 			),
 		),
 	);
+	if (snapshot.model.startsWith(`${id}/`)) rows.push([navButton(t(lang, "panel.think"), "think")]);
 	rows.push(pageFooter(lang, "mdl", slice.current, slice.pages, (n) => `mdl:pg:${panelKey([id])}:${n}`));
 	return {
-		text: [t(lang, "panel.mdlTitle", { model: preview(snapshot.model) }), pageTitle(preview(id), slice)].join("\n"),
+		text: [
+			t(lang, "panel.mdlTitle", { model: preview(snapshot.model), thinking: snapshot.thinking }),
+			pageTitle(preview(id), slice),
+		].join("\n"),
 		rows,
+	};
+}
+
+function thinkingPage(snapshot: PanelSnapshot): PanelView {
+	const { lang, thinkingOptions } = snapshot;
+	const buttons =
+		thinkingOptions?.levels.map((level) =>
+			runButton(
+				`${level === snapshot.thinking ? "✓ " : ""}${level}`,
+				"think",
+				"set",
+				`${thinkingOptions.modelKey}:${level}`,
+			),
+		) ?? [];
+	return {
+		text: [
+			t(lang, "panel.mdlTitle", { model: preview(snapshot.model), thinking: snapshot.thinking }),
+			t(lang, buttons.length ? "panel.think" : "panel.thinkUnavailable"),
+		].join("\n"),
+		rows: [...grid(buttons), [navButton(t(lang, "panel.back"), "mdl")]],
 	};
 }
 
@@ -340,6 +368,8 @@ export function renderPage(page: PanelPage, snapshot: PanelSnapshot, arg = "", m
 			return settingsPage(snapshot);
 		case "sys":
 			return systemPage(snapshot);
+		case "think":
+			return thinkingPage(snapshot);
 		case "mdl": {
 			const [name, n] = arg.trim().split(/\s+/);
 			const provider = snapshot.modelsByProvider.find((candidate) => candidate.id === (modelProvider ?? name));
